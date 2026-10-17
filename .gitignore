@@ -1,0 +1,5 @@
+*.o
+/build/
+/miku-zero
+.vscode/
+.DS_Store
