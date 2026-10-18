@@ -52,6 +52,14 @@ int main() {
         "Can the you the. is rejected"
     );
     passed &= check(
+        !generated_response_is_usable(
+            mikuru::tokenize(
+                "That ss d thos d thos d thos d thos d thos d thos."
+            )
+        ),
+        "a repeated word-salad fragment seen in generation is rejected"
+    );
+    passed &= check(
         !generated_response_is_usable({"Step", "."}),
         "Step. is rejected"
     );
@@ -84,6 +92,14 @@ int main() {
              "state", "that", "helps", "it", "process", "sequences", "."}
         ),
         "a normal longer reply is accepted"
+    );
+    passed &= check(
+        generated_response_is_usable(
+            {"We", "can", "take", "it", "one", "step", "at", "a",
+             "time", ".", "Then", "we", "can", "take", "it", "one",
+             "step", "at", "a", "time", "."}
+        ),
+        "a natural response may repeat a phrase twice"
     );
 
     std::mt19937 rng(17);

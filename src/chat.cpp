@@ -1,5 +1,6 @@
 
 #include "dialogue_common.hpp"
+#include "conversation_manager.hpp"
 #include "retrieval.hpp"
 #include "response_quality.hpp"
 #include "system_inspector.hpp"
@@ -102,6 +103,7 @@ int main() {
 
     std::mt19937 rng(std::random_device{}());
     std::vector<TokenId> history{bos_id};
+    mikuru_conversation::ConversationManager conversation_manager;
 
     std::cout
         << "Mikuru v0.2 prompt-conditioned chat\n"
@@ -128,6 +130,7 @@ int main() {
 
         if (input == "/reset") {
             history.assign(1, bos_id);
+            conversation_manager.reset();
             std::cout << "Mikuru> Context cleared. Fresh start!\n";
             continue;
         }
@@ -150,6 +153,12 @@ int main() {
                 std::cout << '\n';
             }
 
+            continue;
+        }
+
+        std::string managed_reply;
+        if (conversation_manager.respond(input, managed_reply)) {
+            std::cout << "Mikuru> " << managed_reply << '\n';
             continue;
         }
 

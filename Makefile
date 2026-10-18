@@ -1,7 +1,7 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wpedantic
 
-.PHONY: all train train-gru chat chat-mlp test test-response-quality clean
+.PHONY: all train train-gru chat chat-mlp test test-response-quality test-conversation-context test-conversation-manager clean
 
 GRU_DIR = experiments/mikuru-v3/gru-v1
 
@@ -22,10 +22,10 @@ build/mikuru-system-inspector: src/system_inspector.cpp | build
 build/test-intent-router: src/test_intent_router.cpp src/intent_router.hpp | build
 	$(CXX) $(CXXFLAGS) $< -o $@
 
-build/mikuru-chat-mlp: src/chat.cpp src/dialogue_common.hpp src/system_inspector.hpp src/intent_router.hpp src/system_personality.hpp src/retrieval.hpp src/response_quality.hpp data/retrieval_dialogue.tsv build/mikuru-system-inspector | build
+build/mikuru-chat-mlp: src/chat.cpp src/dialogue_common.hpp src/conversation_manager.hpp src/system_inspector.hpp src/intent_router.hpp src/system_personality.hpp src/retrieval.hpp src/response_quality.hpp data/retrieval_dialogue.tsv build/mikuru-system-inspector | build
 	$(CXX) $(CXXFLAGS) src/chat.cpp -o $@
 
-build/mikuru-chat: src/chat_gru.cpp src/response_quality.hpp $(GRU_DIR)/src/gru_model.hpp src/dialogue_common.hpp src/system_inspector.hpp src/intent_router.hpp src/system_personality.hpp src/retrieval.hpp data/retrieval_dialogue.tsv build/mikuru-system-inspector | build
+build/mikuru-chat: src/chat_gru.cpp src/conversation_context.hpp src/conversation_manager.hpp src/terminal_ui.hpp src/response_quality.hpp $(GRU_DIR)/src/gru_model.hpp src/dialogue_common.hpp src/system_inspector.hpp src/intent_router.hpp src/system_personality.hpp src/retrieval.hpp data/retrieval_dialogue.tsv build
 	$(CXX) $(CXXFLAGS) src/chat_gru.cpp -o $@
 
 build/mikuru-train-gru: $(GRU_DIR)/src/train_gru.cpp $(GRU_DIR)/src/gru_model.hpp src/dialogue_common.hpp | build
@@ -33,6 +33,12 @@ build/mikuru-train-gru: $(GRU_DIR)/src/train_gru.cpp $(GRU_DIR)/src/gru_model.hp
 
 build/test-response-quality: src/test_response_quality.cpp src/response_quality.hpp src/dialogue_common.hpp | build
 	$(CXX) $(CXXFLAGS) src/test_response_quality.cpp -o $@
+
+build/test-conversation-context: src/test_conversation_context.cpp src/conversation_context.hpp $(GRU_DIR)/src/gru_model.hpp src/dialogue_common.hpp | build
+	$(CXX) $(CXXFLAGS) src/test_conversation_context.cpp -o $@
+
+build/test-conversation-manager: src/test_conversation_manager.cpp src/conversation_manager.hpp src/dialogue_common.hpp | build
+	$(CXX) $(CXXFLAGS) src/test_conversation_manager.cpp -o $@
 
 train: build/mikuru-train
 	./build/mikuru-train
@@ -64,6 +70,12 @@ chat-mlp: build/mikuru-chat-mlp
 
 test-response-quality: build/test-response-quality
 	./build/test-response-quality
+
+test-conversation-context: build/test-conversation-context
+	./build/test-conversation-context
+
+test-conversation-manager: build/test-conversation-manager
+	./build/test-conversation-manager
 
 test: all build/test-intent-router build/test-response-quality
 	./build/test-intent-router

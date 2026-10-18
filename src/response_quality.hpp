@@ -5,6 +5,7 @@
 
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,6 +58,15 @@ inline bool generated_response_is_usable(
 
     for (std::size_t i = 1; i < words.size(); ++i) {
         if (words[i] == words[i - 1]) return false;
+    }
+
+    if (words.size() >= 9) {
+        std::unordered_map<std::string, std::size_t> trigram_counts;
+        for (std::size_t i = 0; i + 2 < words.size(); ++i) {
+            const std::string trigram =
+                words[i] + '\x1f' + words[i + 1] + '\x1f' + words[i + 2];
+            if (++trigram_counts[trigram] >= 3) return false;
+        }
     }
 
     // These are clear unfinished fragments, not a general minimum length.

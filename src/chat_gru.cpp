@@ -1,8 +1,11 @@
 #include "../experiments/mikuru-v3/gru-v1/src/gru_model.hpp"
 
+#include "conversation_context.hpp"
+#include "conversation_manager.hpp"
 #include "response_quality.hpp"
 #include "retrieval.hpp"
 #include "system_inspector.hpp"
+#include "terminal_ui.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -150,42 +153,99 @@ int main(int argc, char** argv) {
     const TokenId user_id = ids.at("<USER>");
     const TokenId assistant_id = ids.at("<ASSISTANT>");
     std::mt19937 rng(seed);
+    mikuru_context::ConversationContext conversation;
+    mikuru_conversation::ConversationManager conversation_manager;
+    mikuru_ui::TerminalUi ui;
 
-    std::cout
-        << "Mikuru hybrid chat | GRU V1 neural fallback\n"
-        << "Hi! I'm Mikuru, a local chatbot with a curious, "
-        << "virtual-singer sparkle. My replies can be unreliable, "
-        << "so let's check important details together.\n"
-        << "Architecture: embedding=" << mg::EMBED_DIM
-        << ", hidden=" << mg::HIDDEN_DIM << '\n'
-        << "Commands: /help, /reset, /quit\n"
-        << "Chats stay in memory only and are not saved to disk.\n";
+    ui.show_banner();
+    ui.show_status(
+        "GRU V1 | embedding=" + std::to_string(mg::EMBED_DIM) +
+        ", hidden=" + std::to_string(mg::HIDDEN_DIM) +
+        " | seed=" + std::to_string(seed)
+    );
 
     std::string input;
-    while (std::cout << "\nYou> " && std::getline(std::cin, input)) {
+    while (true) {
+        ui.show_prompt();
+        if (!std::getline(std::cin, input)) {
+            ui.finish_input_line();
+            break;
+        }
+        ui.finish_input_line();
+
+        if (input.size() > 8192) {
+            ui.show_status(
+                "That message is too long to process at once. "
+                "Please split it into smaller parts."
+            );
+            continue;
+        }
         if (input == "/quit" || input == "/exit") break;
         if (input == "/help") {
-            std::cout
-                << "I'll check known answers first, then use my small GRU "
-                << "language model. Its replies can be off-key, so verify "
-                << "important details. /reset starts fresh; /quit exits.\n";
+            ui.show_status(
+                "System checks and known answers are tried before GRU "
+                "generation. /status shows the backend and in-memory "
+                "context; /reset clears it; /quit exits. Context is not "
+                "saved after this process ends."
+            );
+            continue;
+        }
+        if (input == "/status") {
+            ui.show_status(
+                "GRU V1 | " + model_path + " | " +
+                std::to_string(conversation.retained_turns()) +
+                " in-memory exchanges (limit " +
+                std::to_string(
+                    mikuru_context::ConversationContext::MAX_TURNS
+                ) +
+                ") | inference-prefix cap " +
+                std::to_string(
+                    mikuru_context::ConversationContext::
+                        MAX_CONTEXT_TOKENS
+                ) +
+                " tokens | session-only, not saved"
+            );
             continue;
         }
         if (input == "/reset") {
-            std::cout << "Mikuru> Fresh prompt ready!\n";
+            conversation.reset();
+            conversation_manager.reset();
+            ui.show_status("Conversation context cleared. Fresh start!");
             continue;
         }
-        if (mk::tokenize(input).empty()) {
-            std::cout << "Mikuru> Send me a few words to work with.\n";
+        const auto prompt_words = mk::tokenize(input);
+        if (prompt_words.empty()) {
+            ui.show_status("Send me a few words to work with.");
             continue;
         }
+        if (prompt_words.size() >
+            mikuru_context::ConversationContext::
+                MAX_CURRENT_PROMPT_TOKENS) {
+            ui.show_status(
+                "That message is too long for the current context window. "
+                "Please split it into shorter messages."
+            );
+            continue;
+        }
+        const auto prompt_ids = mk::encode_tokens(input, ids);
 
         std::string system_answer;
         if (mikuru_system::answer_system_question(input, system_answer)) {
-            std::cout << "Mikuru> " << system_answer;
-            if (system_answer.empty() || system_answer.back() != '\n') {
-                std::cout << '\n';
-            }
+            ui.show_reply(system_answer);
+            conversation.remember_turn(
+                user_id, prompt_ids, assistant_id,
+                mk::encode_tokens(system_answer, ids), eos_id
+            );
+            continue;
+        }
+
+        std::string managed_reply;
+        if (conversation_manager.respond(input, managed_reply)) {
+            ui.show_reply(managed_reply);
+            conversation.remember_turn(
+                user_id, prompt_ids, assistant_id,
+                mk::encode_tokens(managed_reply, ids), eos_id
+            );
             continue;
         }
 
@@ -193,15 +253,25 @@ int main(int argc, char** argv) {
             const auto match = retriever.find(input);
             if (match.index >= 0) {
                 const auto& item = retriever.dialogue(match.index);
-                std::cout << "Mikuru> " << item.reply << '\n';
+                ui.show_reply(item.reply);
+                conversation.remember_turn(
+                    user_id, prompt_ids, assistant_id,
+                    mk::encode_tokens(item.reply, ids), eos_id
+                );
                 continue;
             }
         }
 
-        std::vector<TokenId> prefix{bos_id, user_id};
-        const auto prompt_ids = mk::encode_tokens(input, ids);
-        prefix.insert(prefix.end(), prompt_ids.begin(), prompt_ids.end());
-        prefix.push_back(assistant_id);
+        const auto prefix = conversation.build_prefix(
+            bos_id, user_id, prompt_ids, assistant_id
+        );
+        if (prefix.empty()) {
+            ui.show_status(
+                "I couldn't fit that message into the context window. "
+                "Try a shorter message."
+            );
+            continue;
+        }
 
         std::vector<double> hidden(mg::HIDDEN_DIM, 0.0);
         mg::StepCache cache;
@@ -228,10 +298,15 @@ int main(int argc, char** argv) {
             hidden = cache.h;
         }
 
-        std::cout << "Mikuru> "
-                  << mr::format_or_fallback(response, input, rng) << '\n';
+        const std::string reply =
+            mr::format_or_fallback(response, input, rng);
+        ui.show_reply(reply);
+        conversation.remember_turn(
+            user_id, prompt_ids, assistant_id,
+            mk::encode_tokens(reply, ids), eos_id
+        );
     }
 
-    std::cout << "Mikuru> See you next time.\n";
+    ui.show_reply("See you next time!");
     return 0;
 }
