@@ -1,6 +1,17 @@
 *.o
 /build/
 /miku-zero
+/mikuru
+/mikuru-train
+/mikuru-chat
+/mikuru-generate
+/mikuru-text
+/mikuru-text-2
+/mikuru-tokenizer
+/mikuru-dataset
+/xor_network
+*.weights
+*.model
 .vscode/
 .DS_Store
 

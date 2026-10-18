@@ -1,14 +1,11 @@
 #include <iostream>
 
 int main() {
-    double input = 2.0;
-    double weight = 3.0;
-    double bias = 1.0;
+    const double input = 2.0;
+    const double weight = 3.0;
+    const double bias = 1.0;
+    const double output = input * weight + bias;
 
-    double output = input * weight + bias;
-
-    std::cout << "Miku Zero's first neuron: "
-              << output << '\n';
-
+    std::cout << "Mikuru's first neuron: " << output << '\n';
     return 0;
 }
