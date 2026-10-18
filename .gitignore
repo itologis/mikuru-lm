@@ -22,3 +22,29 @@
 /data/*.weights
 /data/training_pairs.csv
 /data/vocab.txt
+
+# Mikuru v3 generated binaries and build artifacts
+/experiments/mikuru-v3/bin/
+/experiments/mikuru-v3/gru-v1/build/
+/experiments/mikuru-v3/evaluation/**/bin/
+/experiments/mikuru-v3/evaluation/gradient-diagnostic-*/mikuru-v3-diagnostic
+
+# Locally generated vocabulary snapshots
+/experiments/mikuru-v3/models/vocabulary.txt
+/experiments/mikuru-v3/evaluation/**/models/vocabulary.txt
+
+# Local backups of the retrieval database
+/data/retrieval_dialogue.tsv.bak.*
+
+# Mikuru v3 generated binaries and build artifacts
+/experiments/mikuru-v3/bin/
+/experiments/mikuru-v3/gru-v1/build/
+/experiments/mikuru-v3/evaluation/**/bin/
+/experiments/mikuru-v3/evaluation/gradient-diagnostic-*/mikuru-v3-diagnostic
+
+# Locally generated vocabulary snapshots
+/experiments/mikuru-v3/models/vocabulary.txt
+/experiments/mikuru-v3/evaluation/**/models/vocabulary.txt
+
+# Local backups of the retrieval database
+/data/retrieval_dialogue.tsv.bak.*

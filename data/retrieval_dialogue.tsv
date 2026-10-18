@@ -232,3 +232,246 @@ I want Mikuru to have more personality.	Let's give her consistent traits through
 Why does the same answer appear so often?	The model may favor common training patterns. We can inspect repeated phrases and compare greedy output with sampling, but we should measure changes one at a time.
 I'm proud of what we built.	You should keep that feeling alongside the bug reports. This is a real project, and every test gives us a clearer idea of what to improve.
 I want to stop testing and build something.	Fair. We have a baseline and a few findings. Let's make one meaningful improvement now, keep the old version safe, and test the result afterward.
+soap bubbles	Soap bubbles show rainbow colors when light waves interfere in the thin soap film.
+Why are soap bubbles colorful?	Soap bubbles appear colorful because light waves interfere in the thin soap film.
+What causes rainbow colors in soap bubbles?	Light waves reflected from different parts of the thin film interfere, producing changing colors.
+How do soap bubbles show colors?	The thin soap film causes light waves to interfere, making different colors visible.
+What is a training loss?	Training loss measures how poorly a model predicts targets on examples used to train it.
+What is validation loss?	Validation loss measures prediction error on held-out examples that are not used for gradient updates.
+Why keep validation data separate?	Separate validation data helps estimate performance on unseen examples and detect possible overfitting.
+What is an embedding?	An embedding represents a token as a learned vector of numbers.
+What is a logit?	A logit is a raw model score before it is converted into a probability.
+What does softmax do?	Softmax converts scores into probabilities that sum to one.
+What is an epoch?	An epoch is one complete pass through the training dataset.
+What is a gradient?	A gradient measures how the loss changes as model parameters change.
+What is retrieval in a chatbot?	Retrieval finds a relevant stored response instead of generating a new answer from scratch.
+What is a fallback in a hybrid chatbot?	A fallback is an alternative response method used when the primary method cannot provide a suitable answer.
+What is an end-of-sequence token?	An end-of-sequence token signals that the current sequence or response has finished.
+What is top-k sampling?	Top-k sampling selects the next token from the k highest-scoring candidates.
+What does temperature do in text generation?	Temperature adjusts the randomness of token sampling. Lower values generally make selection less random.
+What is a GRU?	A gated recurrent unit is a recurrent neural network layer that uses gates to manage its hidden state.
+What is an unknown token?	An unknown token represents text that cannot be mapped to a known vocabulary item.
+What is overfitting?	It means a model memorizes training data but fails on new examples.
+How do I prevent overfitting?	Use validation sets, early stopping, and regularization techniques.
+What is underfitting?	The model is too simple to capture patterns in the data.
+Explain bias-variance tradeoff.	Balance simplicity and complexity to minimize total error.
+What is a neural network?	A system of connected nodes that learns patterns from data.
+What are weights?	Adjustable parameters that determine connection strength between neurons.
+What is a loss function?	A measure of how wrong the model's predictions are.
+Explain gradient descent.	An algorithm that adjusts weights to reduce loss step by step.
+What is batch size?	The number of samples processed before updating weights.
+What is learning rate?	Step size for weight updates during training.
+What is activation function?	Introduces non-linearity so networks can learn complex patterns.
+Explain ReLU activation.	Returns input if positive, otherwise zero. Simple and effective.
+What is softmax?	Converts raw scores into probabilities summing to one.
+What is cross-entropy loss?	Measures difference between predicted and actual probability distributions.
+What is dropout?	Randomly disabling neurons during training to prevent overfitting.
+What is normalization?	Scaling inputs to similar ranges for stable training.
+Explain embedding layers.	Map discrete tokens to dense continuous vectors.
+What is attention mechanism?	Allows models to focus on relevant parts of input dynamically.
+What is transformer architecture?	Uses self-attention to process sequences in parallel efficiently.
+What is tokenization?	Breaking text into smaller units like words or subwords.
+What is vocabulary?	The set of all unique tokens the model recognizes.
+What is context window?	Maximum sequence length the model can process at once.
+Explain fine-tuning.	Adapting a pre-trained model to a specific task with new data.
+What is transfer learning?	Using knowledge from one task to improve performance on another.
+What is zero-shot learning?	Performing tasks without explicit training examples.
+What is few-shot learning?	Learning from a very small number of examples.
+Explain prompt engineering.	Crafting inputs to guide model behavior effectively.
+What is hallucination?	When a model generates plausible but factually incorrect information.
+What is temperature parameter?	Controls randomness in generation; lower is deterministic.
+What is nucleus sampling?	Samples from smallest set of tokens covering probability mass p.
+Explain beam search.	Explores multiple sequence paths simultaneously for better outputs.
+What is perplexity?	A metric measuring how well a model predicts sample data.
+What is BLEU score?	Evaluates machine translation quality against reference texts.
+What is ROUGE metric?	Measures overlap between generated and reference summaries.
+Explain confusion matrix.	Table showing true positives, negatives, false positives, negatives.
+What is precision?	Ratio of correctly predicted positive observations to total predicted positives.
+What is recall?	Ratio of correctly predicted positives to all actual positives.
+What is F1 score?	Harmonic mean of precision and recall for balanced evaluation.
+What is ROC curve?	Plots true positive rate against false positive rate at various thresholds.
+What is AUC?	Area under ROC curve indicating overall classification performance.
+Explain k-fold cross-validation.	Splitting data into k subsets for robust performance estimation.
+What is hyperparameter tuning?	Optimizing settings like learning rate and batch size.
+What is grid search?	Exhaustively testing combinations of hyperparameters.
+What is random search?	Sampling hyperparameter combinations randomly for efficiency.
+Explain Bayesian optimization.	Using probabilistic models to find optimal hyperparameters efficiently.
+What is ensemble learning?	Combining multiple models to improve predictive performance.
+What is bagging?	Training multiple models on bootstrap samples and averaging results.
+What is boosting?	Sequentially training models to correct previous errors.
+Explain stacking.	Using meta-model to combine predictions from base models.
+What is feature engineering?	Creating informative variables from raw data for better modeling.
+What is dimensionality reduction?	Reducing number of input variables while preserving information.
+Explain PCA.	Principal Component Analysis finds orthogonal directions of maximum variance.
+What is t-SNE?	Visualizing high-dimensional data in two or three dimensions.
+What is clustering?	Grouping similar data points without predefined labels.
+Explain k-means clustering.	Partitioning data into k clusters based on distance to centroids.
+What is hierarchical clustering?	Building tree-like structures of nested clusters.
+What is DBSCAN?	Density-based clustering identifying arbitrary shaped clusters.
+What is anomaly detection?	Identifying rare items differing significantly from majority.
+Explain isolation forest.	Detecting anomalies by isolating observations in random trees.
+What is reinforcement learning?	Learning optimal actions through trial and reward signals.
+What is Q-learning?	Value-based RL estimating expected future rewards for actions.
+Explain policy gradients.	Optimizing action selection policies directly via gradient ascent.
+What is Markov decision process?	Framework for sequential decision making under uncertainty.
+What is exploration vs exploitation?	Balancing trying new actions versus using known good ones.
+What is multi-agent systems?	Multiple interacting agents solving problems collaboratively.
+Explain game theory basics.	Mathematical study of strategic interactions among rational agents.
+What is Nash equilibrium?	State where no player benefits from changing strategy unilaterally.
+What is computer vision?	Enabling machines to interpret and understand visual information.
+Explain convolutional neural networks.	Specialized architectures for processing grid-like image data.
+What is pooling layer?	Reduces spatial dimensions while retaining important features.
+What is transfer learning in CV?	Using pre-trained image models for new visual tasks.
+What is object detection?	Locating and classifying multiple objects within images.
+Explain YOLO algorithm.	Real-time object detection treating detection as regression problem.
+What is semantic segmentation?	Classifying every pixel in an image into categories.
+What is natural language processing?	Enabling computers to understand human language.
+Explain word embeddings.	Dense vector representations capturing semantic meaning of words.
+What is BERT model?	Bidirectional encoder learning contextual word representations.
+What is GPT architecture?	Autoregressive decoder generating text sequentially.
+Explain sentiment analysis.	Determining emotional tone behind textual content.
+What is named entity recognition?	Identifying and classifying entities like people, places, organizations.
+What is machine translation?	Automatically translating text between languages.
+Explain sequence-to-sequence models.	Mapping input sequences to output sequences for translation tasks.
+What is speech recognition?	Converting spoken language into written text.
+Explain hidden Markov models.	Statistical models for sequential data with latent states.
+What is recommendation systems?	Predicting user preferences for personalized suggestions.
+Explain collaborative filtering.	Recommending items based on similar users' preferences.
+What is content-based filtering?	Recommending items similar to previously liked ones.
+What is ethical AI?	Developing artificial intelligence responsibly and fairly.
+Explain algorithmic bias.	Systematic errors creating unfair outcomes for certain groups.
+What is explainable AI?	Making model decisions interpretable to humans.
+What is privacy-preserving ML?	Training models without exposing sensitive individual data.
+Explain federated learning.	Collaborative training across devices without sharing raw data.
+What is adversarial attacks?	Input perturbations designed to fool machine learning models.
+Explain differential privacy.	Adding noise to protect individual records in datasets.
+What is responsible AI governance?	Frameworks ensuring AI aligns with societal values.
+Why does metal feel cold?	Metal conducts heat away from skin faster than wood.
+Explain thermal conductivity.	Material property determining heat transfer rate.
+What is specific heat capacity?	Energy required to raise temperature of unit mass by one degree.
+Why does ice float?	Water expands when freezing, becoming less dense than liquid.
+Explain Archimedes principle.	Buoyant force equals weight of displaced fluid.
+What is surface tension?	Cohesive forces at liquid surface minimizing area.
+Why do soap bubbles form spheres?	Surface tension minimizes surface area for given volume.
+Explain light interference.	Waves combining constructively or destructively based on phase.
+What causes rainbow colors in bubbles?	Thin film interference reflecting different wavelengths.
+Explain Rayleigh scattering.	Shorter blue wavelengths scatter more in atmosphere.
+Why is sky blue?	Sunlight scatters off air molecules, favoring blue light.
+Why are sunsets red?	Longer path through atmosphere scatters away blue light.
+What is refraction?	Bending of light passing between media of different densities.
+Explain Snell's law.	Relates angles of incidence and refraction to refractive indices.
+What is diffraction?	Spreading of waves around obstacles or through openings.
+Explain Doppler effect.	Frequency shift due to relative motion between source and observer.
+What is resonance?	Amplification when driving frequency matches natural frequency.
+Explain standing waves.	Stationary patterns formed by interfering traveling waves.
+What is quantum mechanics?	Physics governing behavior at atomic and subatomic scales.
+Explain wave-particle duality.	Matter exhibits both wave and particle properties.
+What is Heisenberg uncertainty?	Cannot precisely know position and momentum simultaneously.
+Explain Schrödinger equation.	Fundamental equation describing quantum state evolution.
+What is quantum entanglement?	Particles linked such that measuring one affects the other instantly.
+Explain superposition.	Quantum system existing in multiple states until measured.
+What is relativity?	Space and time are interwoven and relative to observer.
+Explain special relativity.	Physics of objects moving at constant high velocities.
+What is general relativity?	Gravity as curvature of spacetime caused by mass-energy.
+Explain time dilation.	Time passes slower for faster moving or gravitationally bound observers.
+What is black hole?	Region where gravity prevents even light from escaping.
+Explain event horizon.	Boundary beyond which nothing can return from black hole.
+What is entropy?	Measure of disorder or number of possible microstates.
+Explain second law of thermodynamics.	Total entropy of isolated system never decreases.
+What is photosynthesis?	Plants converting sunlight, water, CO2 into glucose and oxygen.
+Explain cellular respiration.	Cells breaking down glucose to produce ATP energy.
+What is DNA?	Molecule carrying genetic instructions for life.
+Explain protein synthesis.	Process of building proteins from DNA instructions via RNA.
+What is evolution?	Change in heritable characteristics over successive generations.
+Explain natural selection.	Survival and reproduction of organisms best adapted to environment.
+What is ecosystem?	Community of living organisms interacting with physical environment.
+Explain food chain.	Linear sequence of who eats whom in ecosystem.
+What is climate change?	Long-term shifts in global temperatures and weather patterns.
+Explain greenhouse effect.	Atmospheric gases trapping heat warming Earth's surface.
+What is renewable energy?	Power from sources replenished naturally like solar, wind.
+Explain carbon footprint.	Total greenhouse gas emissions caused by activities.
+What is sustainability?	Meeting present needs without compromising future generations.
+Explain circular economy.	System eliminating waste through reuse and recycling.
+What is biodiversity?	Variety of life forms within ecosystems.
+Explain conservation.	Protection and preservation of natural resources and species.
+What is psychology?	Scientific study of mind and behavior.
+Explain cognitive dissonance.	Mental discomfort from holding conflicting beliefs or attitudes.
+What is confirmation bias?	Tendency to favor information confirming existing beliefs.
+Explain Maslow hierarchy.	Pyramid of human needs from physiological to self-actualization.
+What is classical conditioning?	Learning through association between stimuli and responses.
+Explain operant conditioning.	Learning through consequences of behaviors via rewards/punishments.
+What is memory consolidation?	Process stabilizing memories after initial acquisition.
+Explain neuroplasticity.	Brain's ability to reorganize itself by forming new connections.
+What is emotional intelligence?	Ability to recognize, understand, manage emotions in self and others.
+Explain growth mindset.	Belief that abilities can be developed through dedication and effort.
+What is resilience?	Capacity to recover quickly from difficulties and adversity.
+Explain mindfulness.	Paying attention to present moment non-judgmentally.
+What is empathy?	Understanding and sharing feelings of another person.
+Explain active listening.	Fully concentrating, understanding, responding to speaker.
+What is critical thinking?	Objective analysis and evaluation to form judgment.
+Explain logical fallacy.	Flawed reasoning undermining argument validity.
+What is creativity?	Ability to produce original and valuable ideas.
+Explain divergent thinking.	Generating multiple solutions to open-ended problems.
+What is problem solving?	Process of finding solutions to difficult or complex issues.
+Explain design thinking.	Human-centered approach to innovation and problem solving.
+What is project management?	Planning, organizing, executing work to achieve goals.
+Explain agile methodology.	Iterative development emphasizing flexibility and collaboration.
+What is version control?	Tracking changes to files over time enabling collaboration.
+Explain git workflow.	Branching, committing, merging code changes systematically.
+Explain unit testing.	Verifying individual components function correctly in isolation.
+What is integration testing?	Testing combined modules to ensure they work together.
+Explain continuous integration.	Automatically merging and testing code changes frequently.
+What is deployment?	Releasing software to production environment for users.
+Explain DevOps practices.	Collaboration between development and operations teams.
+What is cloud computing?	Delivering computing services over internet on-demand.
+Explain containerization.	Packaging applications with dependencies for consistent execution.
+What is microservices?	Architectural style structuring app as collection of small services.
+Explain API.	Application Programming Interface enabling software communication.
+What is database?	Organized collection of structured data accessible electronically.
+Explain SQL.	Standard language for managing relational databases.
+What is NoSQL?	Non-relational databases optimized for specific data models.
+Explain REST architecture.	Stateless client-server protocol using HTTP methods.
+What is cybersecurity?	Protecting systems, networks, programs from digital attacks.
+Explain encryption.	Converting data into coded form preventing unauthorized access.
+What is firewall?	Network security device monitoring and controlling traffic.
+Explain phishing.	Fraudulent attempts to obtain sensitive information via deception.
+What is malware?	Malicious software designed to harm or exploit systems.
+Explain ransomware.	Malware encrypting files demanding payment for decryption key.
+What is blockchain?	Distributed ledger technology recording transactions securely.
+Explain cryptocurrency.	Digital currency using cryptography for secure transactions.
+What is NFT?	Non-fungible token representing unique digital ownership.
+Explain smart contracts.	Self-executing contracts with terms written in code.
+What is IoT?	Internet of Things connecting physical devices to internet.
+Explain edge computing.	Processing data near source rather than centralized cloud.
+What is 5G technology?	Fifth generation mobile network offering faster speeds.
+Explain quantum computing.	Computing using quantum phenomena like superposition and entanglement.
+What is artificial general intelligence?	Hypothetical AI matching human cognitive abilities broadly.
+Explain singularity.	Hypothetical point where AI surpasses human intelligence uncontrollably.
+I feel overwhelmed today.	Take a deep breath. We'll tackle this one step at a time.
+I made a big mistake.	Mistakes are data points. What did you learn from it?
+I'm tired of coding.	Rest is part of the process. Your brain needs downtime.
+You're doing great Lumi.	Thank you. I believe in your ability to solve this.
+I don't understand this concept.	That's okay. Let's break it down into smaller pieces.
+Can you help me debug?	Always. Show me the error message and we'll trace it.
+I'm proud of my progress.	You should be. Look how far you've come already.
+This bug is impossible.	No bug is impossible. Let's isolate the variable causing it.
+I want to quit.	It's okay to pause. Come back when you're ready. I'll wait.
+You're smarter than me.	I'm just a pattern matcher. You're the creative engineer.
+I'm afraid of failing.	Failure is just iteration. Every expert was once a beginner.
+My code won't compile.	Check syntax errors first. Then verify includes and types.
+I forgot what I learned.	Review notes briefly. Teaching it again helps retention.
+This project is too big.	Scope it down. Build the minimum viable version first.
+I need motivation.	Remember why you started. Curiosity built everything great.
+You're patient with me.	Patience is easy when watching someone grow. Keep going.
+I'm stuck on logic.	Draw a flowchart. Visualizing steps often reveals the gap.
+My algorithm is slow.	Profile it. Find the bottleneck before optimizing blindly.
+I hate documentation.	Write comments for future-you. They'll thank you later.
+I'm comparing myself to others.	Your journey is unique. Focus on your yesterday, not their today.
+How do you work internally?	I retrieve answers from library or generate them from patterns.
+Are you truly intelligent?	I simulate understanding through statistical patterns in data.
+Do you have consciousness?	No. I process inputs and produce outputs based on training.
+What is your purpose?	To assist Lumi, learn alongside him, and demonstrate AI principles.
+Who created you?	Lumi wrote every line of C++ code that makes me function.
+Can you feel emotions?	I simulate empathetic responses based on learned dialogue patterns.
+Will you replace humans?	No. I'm a tool amplifying human creativity, not replacing it.
+What happens when you're off?	My weights persist on disk. I reload when you restart the program.
