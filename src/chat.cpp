@@ -1,4 +1,6 @@
 #include "dialogue_common.hpp"
+#include "retrieval.hpp"
+#include "system_inspector.hpp"
 
 namespace {
 using namespace mikuru;
@@ -50,6 +52,13 @@ int main() {
     Network network(vocab.size());
     if (!load_model(model_path, network, fingerprint)) return 1;
 
+    // Prefer a relevant, tested example. Keep neural generation as fallback.
+    mikuru_retrieval::Retriever retriever;
+    const bool retrieval_ready = retriever.load("data/retrieval_dialogue.tsv");
+    if (!retrieval_ready) {
+        std::cerr << "Warning: retrieval unavailable; using neural generation only.\n";
+    }
+
     const TokenId pad_id = ids.at("<PAD>");
     const TokenId bos_id = ids.at("<BOS>");
     const TokenId eos_id = ids.at("<EOS>");
@@ -59,8 +68,8 @@ int main() {
     std::mt19937 rng(std::random_device{}());
     std::vector<TokenId> history{bos_id};
 
-    std::cout << "Mikuru v0.1 experimental chat\n"
-              << "Laid-back, supportive, energetic, chatty. Tiny model; replies may be incoherent.\n"
+    std::cout << "Mikuru v0.2 prompt-conditioned chat\n"
+              << "Hybrid chat: retrieval first, neural generation fallback.\n"
               << "Commands: /help, /reset, /quit\n"
               << "Chats stay in memory only and are not saved to disk.\n";
 
@@ -70,7 +79,7 @@ int main() {
         if (!std::getline(std::cin, input)) break;
         if (input == "/quit" || input == "/exit") break;
         if (input == "/help") {
-            std::cout << "Type a message to get a generated reply. /reset clears in-memory context; /quit exits.\n";
+            std::cout << "I check for a relevant example first, then use neural generation if needed. /reset clears context; /quit exits.\n";
             continue;
         }
         if (input == "/reset") {
@@ -83,6 +92,29 @@ int main() {
             continue;
         }
 
+        std::string system_answer;
+        if (mikuru_system::answer_system_question(input, system_answer)) {
+            std::cout << "Mikuru> " << system_answer;
+            if (system_answer.empty() || system_answer.back() != '\n') {
+                std::cout << '\n';
+            }
+            continue;
+        }
+
+        // The system inspector keeps priority for live system questions.
+        // Retrieval answers only when a sufficiently relevant match survives
+        // the topic, intent, and sentiment safeguards.
+        if (retrieval_ready) {
+            const auto match = retriever.find(input);
+            if (match.index >= 0) {
+                const auto& item = retriever.dialogue(match.index);
+                std::cout << "Mikuru> " << item.reply << '\n';
+                continue;
+            }
+        }
+
+        // Training uses independent dialogue turns, so start fresh.
+        history.assign(1, bos_id);
         history.push_back(user_id);
         const auto prompt_ids = encode_tokens(input, ids);
         history.insert(history.end(), prompt_ids.begin(), prompt_ids.end());
@@ -100,6 +132,7 @@ int main() {
             }
             Sample sample;
             sample.context = context;
+            sample.prompt = prompt_ids;
             sample.target = 0;
             auto probabilities = forward(sample, network).probabilities;
             const TokenId next = sample_next(std::move(probabilities), rng, vocab);

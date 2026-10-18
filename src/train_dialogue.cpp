@@ -51,6 +51,7 @@ int main() {
     std::mt19937 rng(20261018);
     std::uniform_real_distribution<double> init(-0.08, 0.08);
     for (double& value : network.w1) value = init(rng);
+    for (double& value : network.wp) value = init(rng);
     for (double& value : network.w2) value = init(rng);
 
     const double initial_training_loss = loss(training_samples, network);
@@ -66,6 +67,8 @@ int main() {
               << "Validation targets: " << validation_samples.size() << "\n"
               << "Architecture: context=" << CONTEXT_SIZE
               << ", hidden=" << HIDDEN_SIZE << "\n"
+              << "Prompt conditioning: mean of full user prompt\n"
+              << "Parameters: " << parameter_count(network) << "\n"
               << "Initial training loss: " << initial_training_loss << "\n"
               << "Initial validation loss: " << initial_validation_loss << "\n";
 
@@ -106,14 +109,30 @@ int main() {
                 network.b2[token] -= LEARNING_RATE * output_gradient[token];
             }
 
-            // Backpropagate through tanh and the positional token lookup.
+            // Backpropagate through tanh, local context, and prompt input.
             for (std::size_t j = 0; j < HIDDEN_SIZE; ++j) {
                 const double h = pass.hidden[j];
                 const double gradient = hidden_gradient[j] * (1.0 - h * h);
                 network.b1[j] -= LEARNING_RATE * gradient;
+
                 for (std::size_t position = 0; position < CONTEXT_SIZE; ++position) {
-                    const auto index = w1_index(position, sample.context[position], j, vocab.size());
+                    const auto index = w1_index(
+                        position, sample.context[position], j, vocab.size());
                     network.w1[index] -= LEARNING_RATE * gradient;
+                }
+
+                if (!sample.prompt.empty()) {
+                    const double scale =
+                        1.0 / static_cast<double>(sample.prompt.size());
+
+                    for (const TokenId token : sample.prompt) {
+                        if (token < vocab.size()) {
+                            const std::size_t index =
+                                token * HIDDEN_SIZE + j;
+                            network.wp[index] -=
+                                LEARNING_RATE * gradient * scale;
+                        }
+                    }
                 }
             }
         }
