@@ -22,7 +22,7 @@
 
 namespace mikuru {
 
-constexpr std::size_t CONTEXT_SIZE = 6;
+constexpr std::size_t CONTEXT_SIZE = 32;
 constexpr std::size_t HIDDEN_SIZE = 40;
 constexpr int EPOCHS = 15;
 constexpr double LEARNING_RATE = 0.035;
