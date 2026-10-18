@@ -3,3 +3,11 @@
 /miku-zero
 .vscode/
 .DS_Store
+
+# Local executables and generated model artifacts
+/mikuru
+/mikuru-*
+/xor_network
+/data/*.weights
+/data/training_pairs.csv
+/data/vocab.txt
