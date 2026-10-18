@@ -229,22 +229,22 @@ int main(int argc, char** argv) {
         }
         const auto prompt_ids = mk::encode_tokens(input, ids);
 
-        std::string system_answer;
-        if (mikuru_system::answer_system_question(input, system_answer)) {
-            ui.show_reply(system_answer);
-            conversation.remember_turn(
-                user_id, prompt_ids, assistant_id,
-                mk::encode_tokens(system_answer, ids), eos_id
-            );
-            continue;
-        }
-
         std::string managed_reply;
         if (conversation_manager.respond(input, managed_reply)) {
             ui.show_reply(managed_reply);
             conversation.remember_turn(
                 user_id, prompt_ids, assistant_id,
                 mk::encode_tokens(managed_reply, ids), eos_id
+            );
+            continue;
+        }
+
+        std::string system_answer;
+        if (mikuru_system::answer_system_question(input, system_answer)) {
+            ui.show_reply(system_answer);
+            conversation.remember_turn(
+                user_id, prompt_ids, assistant_id,
+                mk::encode_tokens(system_answer, ids), eos_id
             );
             continue;
         }

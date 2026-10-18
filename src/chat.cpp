@@ -140,7 +140,13 @@ int main() {
             continue;
         }
 
-        // System questions retain their existing priority.
+        std::string managed_reply;
+        if (conversation_manager.respond(input, managed_reply)) {
+            std::cout << "Mikuru> " << managed_reply << '\n';
+            continue;
+        }
+
+        // System questions are checked after conversation-memory matches.
         std::string system_answer;
 
         if (mikuru_system::answer_system_question(
@@ -153,12 +159,6 @@ int main() {
                 std::cout << '\n';
             }
 
-            continue;
-        }
-
-        std::string managed_reply;
-        if (conversation_manager.respond(input, managed_reply)) {
-            std::cout << "Mikuru> " << managed_reply << '\n';
             continue;
         }
 
