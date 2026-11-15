@@ -1,0 +1,10 @@
+[package]
+name = "mikuru-transformer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+burn.workspace = true
+mikuru-core = { path = "../mikuru-core" }

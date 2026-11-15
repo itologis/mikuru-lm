@@ -1,0 +1,15 @@
+[package]
+name = "mikuru-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mikuru-lm"
+path = "src/main.rs"
+
+[dependencies]
+mikuru-backend = { path = "../mikuru-backend" }
+mikuru-core = { path = "../mikuru-core" }
+serde_json.workspace = true

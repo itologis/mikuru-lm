@@ -1,0 +1,11 @@
+[package]
+name = "mikuru-tokenizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mikuru-core = { path = "../mikuru-core" }
+serde_json.workspace = true
+tokenizers = { version = "=0.23.2", default-features = false, features = ["fancy-regex"] }
