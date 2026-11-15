@@ -1,0 +1,6 @@
+/target/
+*.safetensors
+*.burnpack
+/checkpoints/
+/datasets/private/
+.DS_Store
