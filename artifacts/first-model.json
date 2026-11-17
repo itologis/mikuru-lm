@@ -1,0 +1,13 @@
+{
+  "format_version": 1,
+  "dataset_path": "data/samples/tiny.jsonl",
+  "tokenizer_path": "artifacts/mikuru-bpe.json",
+  "epochs": 50,
+  "learning_rate": 0.001,
+  "vocab_size": 294,
+  "model_dim": 64,
+  "num_layers": 1,
+  "num_heads": 4,
+  "max_seq_len": 128,
+  "seed": 42
+}
