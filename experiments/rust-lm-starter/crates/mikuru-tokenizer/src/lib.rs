@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, error::Error, io, path::Path};
 
-use mikuru_core::ConversationExample;
+use mikuru_core::{ConversationExample, ConversationMessage};
 
 use tokenizers::{
     AddedToken, Tokenizer,
@@ -143,6 +143,53 @@ impl MikuruTokenizer {
     }
 }
 
+/// Formats conversation history as an assistant generation prefix.
+///
+/// Unlike format_conversation(), this deliberately does not append EOS.
+/// It ends at `assistant:` without a trailing space, so ByteLevel BPE
+/// sees the same prefix boundary as the original training conversation.
+pub fn format_generation_prompt(messages: &[ConversationMessage]) -> TokenizerResult<String> {
+    if messages.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Generation history must contain at least one message",
+        )
+        .into());
+    }
+
+    let mut formatted = String::from(BOS_TOKEN);
+
+    for message in messages {
+        if message.role.trim().is_empty() || message.content.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Generation messages cannot have empty roles or content",
+            )
+            .into());
+        }
+
+        formatted.push('\n');
+        formatted.push_str(message.role.trim());
+        formatted.push_str(": ");
+        formatted.push_str(&message.content);
+    }
+
+    // IMPORTANT: No trailing space after the assistant colon.
+    formatted.push_str("\nassistant:");
+
+    Ok(formatted)
+}
+
+/// Formats one user message into the canonical generation prefix.
+pub fn format_user_prompt(user_message: &str) -> TokenizerResult<String> {
+    let message = ConversationMessage {
+        role: "user".to_owned(),
+        content: user_message.to_owned(),
+    };
+
+    format_generation_prompt(&[message])
+}
+
 /// Converts a structured conversation into the text format consumed by the tokenizer.
 ///
 /// Speaker roles and conversation boundaries are preserved using explicit markers.
@@ -189,6 +236,7 @@ mod tests {
             synthetic: true,
             split: Some("test".to_owned()),
             references: Vec::new(),
+            source_message_ids: Vec::new(),
             provenance_note: "Unit test.".to_owned(),
         };
 
@@ -226,5 +274,71 @@ mod tests {
         for special in SPECIAL_TOKENS {
             assert!(tokenizer.token_id(special).is_some());
         }
+    }
+
+    #[test]
+    fn generation_prompt_matches_training_token_prefix() {
+        let messages = vec![
+            ConversationMessage {
+                role: "user".to_owned(),
+                content: "Hello, Mikuru!".to_owned(),
+            },
+            ConversationMessage {
+                role: "assistant".to_owned(),
+                content: "Hello! What shall we explore today?".to_owned(),
+            },
+        ];
+
+        let example = ConversationExample {
+            id: "generation-prefix-test".to_owned(),
+            messages: messages.clone(),
+            language: "en".to_owned(),
+            category: "general_conversation".to_owned(),
+            source_dataset: "Mikuru Test".to_owned(),
+            source_record_id: "generation-prefix-test".to_owned(),
+            source_url: "N/A".to_owned(),
+            license: "Project Internal".to_owned(),
+            synthetic: true,
+            split: Some("test".to_owned()),
+            references: Vec::new(),
+            source_message_ids: Vec::new(),
+            provenance_note: "Tokenizer regression test.".to_owned(),
+        };
+
+        let training_text = format_conversation(&example);
+        let generation_prompt =
+            format_generation_prompt(&messages[..1]).expect("prompt should format");
+
+        assert_eq!(
+            generation_prompt,
+            "<|bos|>\nuser: Hello, Mikuru!\nassistant:"
+        );
+
+        assert!(!generation_prompt.ends_with(' '));
+
+        let samples = vec![training_text.clone()];
+
+        let config = BpeTrainingConfig {
+            vocab_size: 512,
+            min_frequency: 1,
+        };
+
+        let tokenizer = MikuruTokenizer::train_from_iterator(samples.iter(), &config)
+            .expect("test tokenizer should train");
+
+        let training_ids = tokenizer
+            .encode(&training_text)
+            .expect("training text should encode");
+
+        let prompt_ids = tokenizer
+            .encode(&generation_prompt)
+            .expect("generation prompt should encode");
+
+        assert!(
+            training_ids.starts_with(&prompt_ids),
+            "Generation prompt must be an exact token prefix of training text.\n\
+             Prompt IDs: {prompt_ids:?}\n\
+             Training IDs: {training_ids:?}"
+        );
     }
 }

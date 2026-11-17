@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "split_source": "deterministic",
+  "split_seed": 42,
+  "validation_fraction": 0.2,
+  "train_records": 1,
+  "validation_records": 1,
+  "sources": [
+    {
+      "source_dataset": "Mikuru Demo",
+      "license": "Project Internal",
+      "records": 2,
+      "synthetic_records": 2
+    }
+  ]
+}

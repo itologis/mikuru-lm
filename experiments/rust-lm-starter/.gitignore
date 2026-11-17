@@ -4,3 +4,29 @@
 /checkpoints/
 /datasets/private/
 .DS_Store
+
+# Local training data
+/data/imports/*.jsonl
+/data/prepared/**/*.jsonl
+/data/prepared/*/*.jsonl
+
+# Local model checkpoints and optimizer states
+/artifacts/*.bpk
+/artifacts/*.optim
+/artifacts/*.optim.bpk
+
+# Large qualification metadata not needed in the public repository
+/data/third-party/taskmaster1/qualification/taskmaster1-manifest.jsonl
+
+# Local training data
+/data/imports/*.jsonl
+/data/prepared/**/*.jsonl
+/data/prepared/*/*.jsonl
+
+# Local model checkpoints and optimizer states
+/artifacts/*.bpk
+/artifacts/*.optim
+/artifacts/*.optim.bpk
+
+# Large qualification metadata not needed in the public repository
+/data/third-party/taskmaster1/qualification/taskmaster1-manifest.jsonl

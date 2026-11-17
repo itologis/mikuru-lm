@@ -1,0 +1,503 @@
+{
+  "tool": "mikuru-lm inspect-taskmaster1",
+  "format_version": 1,
+  "dataset": {
+    "name": "Taskmaster-1",
+    "publisher": "Google LLC",
+    "upstream_repository": "https://github.com/google-research-datasets/Taskmaster",
+    "upstream_revision": "d92cb6af3005f1dc09c39e75e7daf4a04905e00b",
+    "subset_directory": "TM-1-2019",
+    "paper_url": "https://arxiv.org/abs/1909.05358",
+    "description": "13,215 task-oriented dialogs: 7,708 written self-dialogs and 5,507 spoken Wizard-of-Oz dialogs across six domains.",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence_file": "README.md",
+    "license_evidence_present": true,
+    "license_findings": {
+      "repository_license_metadata": "No separate LICENSE file or repository-level license metadata was present at the pinned revision.",
+      "data_notice": "The TM-1-2019 README begins with a COPYRIGHT NOTICE applying the Creative Commons Attribution 4.0 License to the dialog data.",
+      "attribution": "Credit Bill Byrne, Karthik Krishnamoorthi, Chinnadhurai Sankar, Arvind Neelakantan, Amit Dubey, Kyu-Young Kim, and Andy Cedilnik (Google LLC), and cite the Taskmaster-1 EMNLP 2019 paper.",
+      "redistribution": "CC BY 4.0 permits sharing and redistribution with attribution. This is a summary of the published terms, not legal advice.",
+      "modifications": "CC BY 4.0 permits adaptation when the adaptation is indicated and attribution is preserved; adaptations must not imply endorsement by the licensor.",
+      "training_use": "No additional training-use restriction was found in the official README or paper; the notice applies to the dialog data, not only to source code.",
+      "caveats": [
+        "The license notice is in the dataset README, not in a separate LICENSE file or repository metadata.",
+        "Embedded third-party content cannot be ruled out from the published files.",
+        "No consent, anonymization, or PII-scrubbing statement was found in the README or the Taskmaster-1 paper."
+      ]
+    }
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "kind": "license_evidence",
+      "subset": null,
+      "bytes": 8046,
+      "sha256": "05e1bc05724716ca7905f567a2ec30d99c8d2f5f58e926c2ca7d9da116002446",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/README.md"
+    },
+    {
+      "path": "ontology.json",
+      "kind": "ontology",
+      "subset": null,
+      "bytes": 1426,
+      "sha256": "b8103a812799a8c0095800ba9fbf2b4654bccf7f099daa8a4a145c340a69bc52",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/ontology.json"
+    },
+    {
+      "path": "sample.json",
+      "kind": "sample",
+      "subset": null,
+      "bytes": 7116,
+      "sha256": "83fa11504f6e6a8b32fc4f140db82ed624d0e1fdfd0b48f4f40b60c118ac266d",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/sample.json"
+    },
+    {
+      "path": "self-dialogs.json",
+      "kind": "dialog_subset",
+      "subset": "self-dialogs",
+      "bytes": 65748638,
+      "sha256": "1e590ed0ccee279e40c2fb9e083d3b9417477c6bfe35ce5b2277167698dd858d",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/self-dialogs.json"
+    },
+    {
+      "path": "train-dev-test/dev.csv",
+      "kind": "split_list",
+      "subset": null,
+      "bytes": 32340,
+      "sha256": "d83a6f413f45e01b376d611aadf07fd0fc49f6cedffb4ffff7e7b1f8393c13bf",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/train-dev-test/dev.csv"
+    },
+    {
+      "path": "train-dev-test/test.csv",
+      "kind": "split_list",
+      "subset": null,
+      "bytes": 32340,
+      "sha256": "1938698dc98b71c5256c05da092dff0d4f9eff224ec413b3c3eed57bc0bca928",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/train-dev-test/test.csv"
+    },
+    {
+      "path": "train-dev-test/train.csv",
+      "kind": "split_list",
+      "subset": null,
+      "bytes": 259056,
+      "sha256": "88e48f53524ed123dfc57733ccc23f80e176d1e057d7ea46a62a01ddce02626e",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/train-dev-test/train.csv"
+    },
+    {
+      "path": "woz-dialogs.json",
+      "kind": "dialog_subset",
+      "subset": "woz-dialogs",
+      "bytes": 37204053,
+      "sha256": "cd3bc4e968487315d412c044d30af2bf0a4b33c3ef8b74c589f1e1fa832bf72f",
+      "source_url": "https://raw.githubusercontent.com/google-research-datasets/Taskmaster/d92cb6af3005f1dc09c39e75e7daf4a04905e00b/TM-1-2019/woz-dialogs.json"
+    }
+  ],
+  "subsets": {
+    "self-dialogs": {
+      "present": true,
+      "file": "self-dialogs.json",
+      "records_read": 7708,
+      "conversations_read": 7708,
+      "malformed_records": 0,
+      "conversations_valid": 6755,
+      "conversations_flagged": 953,
+      "conversations_invalid": 0,
+      "messages": 169469,
+      "characters": 7390510,
+      "annotated_utterances": 68228,
+      "non_ascii_characters": 1735,
+      "cjk_characters": 0,
+      "non_object_utterances": 0,
+      "missing_text_utterances": 0,
+      "empty_text_utterances": 0,
+      "missing_index_utterances": 0,
+      "non_sequential_index_utterances": 0,
+      "missing_speaker_utterances": 0,
+      "unknown_speaker_utterances": 0,
+      "speakers": {
+        "ASSISTANT": 83776,
+        "USER": 85693
+      },
+      "mapped_roles": {
+        "assistant": 83776,
+        "user": 85693
+      },
+      "unmapped_speakers": {},
+      "domains": {
+        "auto_repair": 1161,
+        "coffee_ordering": 1376,
+        "movie_tickets": 1305,
+        "pizza_ordering": 1468,
+        "restaurant_reservation": 1300,
+        "ride_service": 1098
+      },
+      "instruction_ids": {
+        "auto-repair-appt-1": 1161,
+        "coffee-ordering-1": 735,
+        "coffee-ordering-2": 641,
+        "movie-finder": 54,
+        "movie-ticket-1": 37,
+        "movie-tickets-1": 642,
+        "movie-tickets-2": 377,
+        "movie-tickets-3": 195,
+        "pizza-ordering-1": 257,
+        "pizza-ordering-2": 1211,
+        "restaurant-table-1": 704,
+        "restaurant-table-2": 494,
+        "restaurant-table-3": 102,
+        "uber-lyft-1": 646,
+        "uber-lyft-2": 452
+      },
+      "conversation_messages": {
+        "min": 15,
+        "median": 21,
+        "p90": 26,
+        "max": 30
+      },
+      "conversation_characters": {
+        "min": 21,
+        "median": 897,
+        "p90": 1397,
+        "max": 6024
+      },
+      "utterance_characters": {
+        "min": 1,
+        "median": 36,
+        "p90": 85,
+        "max": 3619
+      },
+      "issues": {
+        "potential_contact_data": 953
+      },
+      "deleted_placeholders": 0,
+      "same_role_adjacencies": 0,
+      "adjacent_duplicate_utterances": 0,
+      "empty_conversations": 0,
+      "budget_fit": {
+        "16m/2000c": 14,
+        "32m/4000c": 7706,
+        "8m/1000c": 0,
+        "8m/500c": 0
+      },
+      "privacy": {
+        "email_like_utterances": 33,
+        "url_like_utterances": 3,
+        "phone_like_utterances": 1191,
+        "long_digit_run_utterances": 24,
+        "utterances_affected": 1217,
+        "conversations_affected": 953
+      },
+      "qualification": {
+        "status": "CONDITIONAL",
+        "reasons": [
+          "License: CC BY 4.0, stated in the TM-1-2019 README copyright notice; the upstream repository has no separate LICENSE file.",
+          "Pinned upstream revision: d92cb6af3005f1dc09c39e75e7daf4a04905e00b.",
+          "953 of 7708 records are flagged, invalid, or malformed; see the structural findings.",
+          "953 conversations contain contact-like patterns (email, URL, phone-like digit runs); no consent, anonymization, or PII-scrubbing statement was found upstream.",
+          "No conversation fits the current 8-message / 500-character training budget; the source is only usable at a larger sequence budget.",
+          "Conditional decision: the subset is potentially useful, but the listed issues need explicit repair/exclusion and privacy decisions before training."
+        ]
+      }
+    },
+    "woz-dialogs": {
+      "present": true,
+      "file": "woz-dialogs.json",
+      "records_read": 5507,
+      "conversations_read": 5507,
+      "malformed_records": 0,
+      "conversations_valid": 440,
+      "conversations_flagged": 5063,
+      "conversations_invalid": 4,
+      "messages": 133597,
+      "characters": 5212194,
+      "annotated_utterances": 42924,
+      "non_ascii_characters": 362,
+      "cjk_characters": 0,
+      "non_object_utterances": 0,
+      "missing_text_utterances": 0,
+      "empty_text_utterances": 0,
+      "missing_index_utterances": 0,
+      "non_sequential_index_utterances": 0,
+      "missing_speaker_utterances": 55,
+      "unknown_speaker_utterances": 0,
+      "speakers": {
+        "<missing>": 55,
+        "ASSISTANT": 73195,
+        "USER": 60347
+      },
+      "mapped_roles": {
+        "assistant": 73195,
+        "user": 60347
+      },
+      "unmapped_speakers": {
+        "<missing>": 55
+      },
+      "domains": {
+        "auto_repair": 699,
+        "coffee_ordering": 766,
+        "movie_tickets": 1037,
+        "pizza_ordering": 970,
+        "restaurant_reservation": 1031,
+        "ride_service": 1004
+      },
+      "instruction_ids": {
+        "auto-repair-1": 361,
+        "auto-repair-2": 338,
+        "coffee-ordering-1": 766,
+        "movie-tickets-1": 424,
+        "movie-tickets-2": 613,
+        "pizza-ordering-1": 970,
+        "restaurant-table-1": 632,
+        "restaurant-table-2": 399,
+        "uber-lyft-1": 1004
+      },
+      "conversation_messages": {
+        "min": 0,
+        "median": 23,
+        "p90": 36,
+        "max": 148
+      },
+      "conversation_characters": {
+        "min": 0,
+        "median": 879,
+        "p90": 1464,
+        "max": 5534
+      },
+      "utterance_characters": {
+        "min": 1,
+        "median": 31,
+        "p90": 80,
+        "max": 747
+      },
+      "issues": {
+        "adjacent_duplicate_utterance": 199,
+        "deleted_placeholder": 744,
+        "duplicate_conversation_id": 6,
+        "duplicate_payload": 11,
+        "empty_conversation": 4,
+        "missing_speaker": 13,
+        "potential_contact_data": 948,
+        "same_role_adjacency": 4972
+      },
+      "deleted_placeholders": 1038,
+      "same_role_adjacencies": 23628,
+      "adjacent_duplicate_utterances": 1410,
+      "empty_conversations": 4,
+      "budget_fit": {
+        "16m/2000c": 967,
+        "32m/4000c": 4614,
+        "8m/1000c": 81,
+        "8m/500c": 81
+      },
+      "privacy": {
+        "email_like_utterances": 0,
+        "url_like_utterances": 1,
+        "phone_like_utterances": 1784,
+        "long_digit_run_utterances": 63,
+        "utterances_affected": 1785,
+        "conversations_affected": 948
+      },
+      "qualification": {
+        "status": "CONDITIONAL",
+        "reasons": [
+          "License: CC BY 4.0, stated in the TM-1-2019 README copyright notice; the upstream repository has no separate LICENSE file.",
+          "Pinned upstream revision: d92cb6af3005f1dc09c39e75e7daf4a04905e00b.",
+          "5067 of 5507 records are flagged, invalid, or malformed; see the structural findings.",
+          "948 conversations contain contact-like patterns (email, URL, phone-like digit runs); no consent, anonymization, or PII-scrubbing statement was found upstream.",
+          "6 records repeat a conversation identifier; the identifier is not a unique key in this subset.",
+          "11 records share an identical ordered speaker/text payload, ignoring annotations and task identifiers; a duplicate policy is required.",
+          "1038 `(deleted)` placeholder utterances remain in the source; a documented repair or exclusion rule is required.",
+          "55 utterances use missing or non-USER/ASSISTANT speaker labels.",
+          "Conditional decision: the subset is potentially useful, but the listed issues need explicit repair/exclusion and privacy decisions before training."
+        ]
+      }
+    }
+  },
+  "totals": {
+    "records_read": 13215,
+    "conversations_read": 13215,
+    "conversations_valid": 7195,
+    "conversations_flagged": 6016,
+    "conversations_invalid": 4,
+    "malformed_records": 0,
+    "messages": 303066,
+    "characters": 12602704
+  },
+  "duplicate_conversation_ids": [
+    {
+      "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0",
+      "occurrences": 6,
+      "locations": [
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1499324,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1499595,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1499846,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1500137,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1500418,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1500699,
+          "conversation_id": "dlg-fdd242eb-56be-48c0-a56e-5478472500d0"
+        }
+      ]
+    }
+  ],
+  "duplicate_payloads": [
+    {
+      "payload_sha256": "0602f0a3155b726c231a78ba10ea5e833c8f609d2a02f4a66f7af5160d02d92e",
+      "occurrences": 5,
+      "locations": [
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 133609,
+          "conversation_id": "dlg-149ba8c1-48ad-47e5-bdec-03e94c6bc698"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 167816,
+          "conversation_id": "dlg-1a51e61d-93e8-49a0-9f09-5276e7e4148c"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 462748,
+          "conversation_id": "dlg-4ace711e-8f20-485c-a719-b09693f25567"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 939864,
+          "conversation_id": "dlg-9c3cd308-252d-4e51-95ee-9e6aa8cfaacd"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1236788,
+          "conversation_id": "dlg-cc8ff07e-3e68-45b4-abdd-40e86a7aef7a"
+        }
+      ]
+    },
+    {
+      "payload_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "occurrences": 4,
+      "locations": [
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 389979,
+          "conversation_id": "dlg-3efc6742-c766-42f1-af72-25d013b2d2ca"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 819413,
+          "conversation_id": "dlg-85dc8356-da6e-43cb-953c-63b12000df21"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1300617,
+          "conversation_id": "dlg-d90eeeb0-09be-42bc-9eab-83e7fd37313a"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1412005,
+          "conversation_id": "dlg-ecad7a15-996b-4a3a-a0b8-a3672026a310"
+        }
+      ]
+    },
+    {
+      "payload_sha256": "6a9b6606b9c068c6c9660badd8bebb991421c33341a7b818e78fc95062e3ac15",
+      "occurrences": 2,
+      "locations": [
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 953842,
+          "conversation_id": "dlg-9e5fda03-f97a-4a6c-bcbc-7aee96487c2d"
+        },
+        {
+          "subset": "woz-dialogs",
+          "file": "woz-dialogs.json",
+          "line": 1111181,
+          "conversation_id": "dlg-b702cdeb-821d-4b78-a88e-47ab676764fa"
+        }
+      ]
+    }
+  ],
+  "split_coverage": {
+    "directory": "train-dev-test",
+    "splits": {
+      "dev": {
+        "present": true,
+        "rows": 770,
+        "unique_ids": 770,
+        "duplicate_ids": 0,
+        "malformed_rows": 0
+      },
+      "test": {
+        "present": true,
+        "rows": 770,
+        "unique_ids": 770,
+        "duplicate_ids": 0,
+        "malformed_rows": 0
+      },
+      "train": {
+        "present": true,
+        "rows": 6168,
+        "unique_ids": 6168,
+        "duplicate_ids": 0,
+        "malformed_rows": 0
+      }
+    },
+    "self_dialog_ids": 7708,
+    "ids_in_splits": 7708,
+    "covered_self_ids": 7708,
+    "missing_from_splits": 0,
+    "extra_in_splits": 0,
+    "overlaps": {}
+  },
+  "privacy_notes": [
+    "Pattern scans are heuristics; they do not prove the presence or absence of personal data.",
+    "No consent, anonymization, or PII-scrubbing statement was found in the official README or the Taskmaster-1 paper.",
+    "The WOZ subset contains upstream `(deleted)` placeholders and blank speaker labels, which indicate redaction or transcription gaps rather than a project repair.",
+    "Reports and manifests contain counts and identifiers only; conversation text is never written."
+  ],
+  "unresolved_questions": [
+    "Are contact-like strings actual personal data, and does the project require redaction before training?",
+    "What repair policy should apply to WOZ blank speakers, duplicate identifiers, same-role adjacency, and deleted placeholders?",
+    "Should the sequence budget grow to admit Taskmaster-1 conversations, or should only the few short conversations be used?",
+    "What attribution text and placement will satisfy CC BY 4.0 in model cards and redistributed artifacts?",
+    "Can third-party content embedded in the published dialogs be ruled out?",
+    "Who gives final training approval, and on what evidence?"
+  ]
+}

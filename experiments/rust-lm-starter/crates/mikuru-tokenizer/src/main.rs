@@ -7,7 +7,7 @@ use std::{
     process,
 };
 
-use mikuru_core::ConversationExample;
+use mikuru_core::{ConversationExample, dataset::DatasetSplit};
 
 use mikuru_tokenizer::{
     BOS_TOKEN, BpeTrainingConfig, EOS_TOKEN, MikuruTokenizer, PAD_TOKEN, TokenizerResult,
@@ -51,10 +51,10 @@ fn run() -> TokenizerResult<()> {
                 )));
             }
 
-            if let Some(parent) = output_path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    create_dir_all(parent)?;
-                }
+            if let Some(parent) = output_path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                create_dir_all(parent)?;
             }
 
             let config = BpeTrainingConfig {
@@ -80,6 +80,10 @@ fn run() -> TokenizerResult<()> {
 
             println!("BPE training completed.");
             println!("Training records: {}", corpus.records_read());
+            println!(
+                "Validation records excluded: {}",
+                corpus.validation_skipped()
+            );
             println!("Vocabulary size: {}", tokenizer.vocab_size());
             println!("Tokenizer saved: {}", output_path.display());
 
@@ -145,6 +149,7 @@ struct JsonlTextIter {
     lines: Lines<BufReader<File>>,
     line_number: usize,
     records_read: usize,
+    validation_skipped: usize,
     error: Option<String>,
 }
 
@@ -156,12 +161,17 @@ impl JsonlTextIter {
             lines: reader.lines(),
             line_number: 0,
             records_read: 0,
+            validation_skipped: 0,
             error: None,
         })
     }
 
     fn records_read(&self) -> usize {
         self.records_read
+    }
+
+    fn validation_skipped(&self) -> usize {
+        self.validation_skipped
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -216,6 +226,25 @@ impl Iterator for JsonlTextIter {
                 return None;
             }
 
+            // Validation records must never influence the BPE vocabulary.
+            if let Some(raw_split) = example.split.as_deref() {
+                match DatasetSplit::parse(raw_split) {
+                    Ok(DatasetSplit::Validation) => {
+                        self.validation_skipped += 1;
+                        continue;
+                    }
+                    // Train and legacy demo records are usable training text.
+                    Ok(DatasetSplit::Train | DatasetSplit::Demo) => {}
+                    Err(message) => {
+                        self.error = Some(format!(
+                            "Invalid split on line {}: {message}",
+                            self.line_number
+                        ));
+                        return None;
+                    }
+                }
+            }
+
             self.records_read += 1;
 
             return Some(format_conversation(&example));
@@ -233,6 +262,9 @@ Commands:
   train <dataset.jsonl> <output.json> [vocab_size]
   encode <tokenizer.json> <text>
   decode <tokenizer.json> <id> [id...]
+
+Records labelled with split \"validation\" are excluded from tokenizer training.
+Train on a prepared train.jsonl, or pass a combined file and let the tool filter.
 
 Default vocabulary target: 8192
 Default minimum pair frequency: 2
@@ -298,6 +330,35 @@ mod cli_error_tests {
             error.contains("line 1"),
             "Error should identify the malformed line: {error}"
         );
+
+        std::fs::remove_file(&path).expect("temporary fixture should be removed");
+    }
+
+    #[test]
+    fn jsonl_iterator_excludes_validation_records_from_training() {
+        let path = std::env::temp_dir().join(format!(
+            "mikuru-tokenizer-split-test-{}.jsonl",
+            std::process::id()
+        ));
+
+        let train_record = r#"{"id":"tokenizer-train-001","messages":[{"role":"user","content":"Hello!"},{"role":"assistant","content":"Hi there!"}],"language":"en","category":"general_conversation","source_dataset":"Mikuru Test","source_record_id":"tokenizer-train-001","source_url":"N/A","license":"Project Internal","synthetic":true,"split":"train","provenance_note":"Temporary unit-test fixture."}"#;
+
+        let validation_record = r#"{"id":"tokenizer-validation-001","messages":[{"role":"user","content":"Hidden validation text"},{"role":"assistant","content":"Should not appear"}],"language":"en","category":"general_conversation","source_dataset":"Mikuru Test","source_record_id":"tokenizer-validation-001","source_url":"N/A","license":"Project Internal","synthetic":true,"split":"validation","provenance_note":"Temporary unit-test fixture."}"#;
+
+        std::fs::write(&path, format!("{train_record}\n{validation_record}\n"))
+            .expect("fixture should be written");
+
+        let mut corpus = JsonlTextIter::open(&path).expect("JSONL reader should open");
+
+        let formatted = corpus.next().expect("training record should be emitted");
+
+        assert!(formatted.contains("Hello!"));
+        assert!(!formatted.contains("Hidden validation text"));
+        assert!(corpus.next().is_none());
+
+        assert_eq!(corpus.records_read(), 1);
+        assert_eq!(corpus.validation_skipped(), 1);
+        assert_eq!(corpus.take_error(), None);
 
         std::fs::remove_file(&path).expect("temporary fixture should be removed");
     }
