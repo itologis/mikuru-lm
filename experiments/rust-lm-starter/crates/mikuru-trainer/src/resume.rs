@@ -109,6 +109,7 @@ pub fn continue_training_from_checkpoint(
         num_heads: metadata.num_heads,
         max_seq_len: metadata.max_seq_len,
         seed: metadata.seed,
+        batch_size: metadata.batch_size,
     };
 
     let dataset_path = Path::new(&metadata.dataset_path);

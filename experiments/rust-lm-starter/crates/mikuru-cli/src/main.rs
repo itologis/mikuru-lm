@@ -155,6 +155,10 @@ fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
                 config.max_seq_len = max_seq_len;
             }
 
+            if let Some(batch_size) = options.batch_size {
+                config.batch_size = Some(batch_size);
+            }
+
             let validation = options.validation.as_deref().map(Path::new);
 
             train_jsonl_with_validation(dataset, validation, tokenizer, checkpoint, &config)?;
@@ -228,6 +232,7 @@ struct TrainOptions {
     epochs: Option<usize>,
     validation: Option<String>,
     max_seq_len: Option<usize>,
+    batch_size: Option<usize>,
 }
 
 /// Parses the optional arguments that follow the three required train paths.
@@ -264,6 +269,22 @@ where
                 }
 
                 options.max_seq_len = Some(parsed);
+            }
+
+            "--batch-size" => {
+                let value = args.next().ok_or("missing value for --batch-size")?;
+
+                if options.batch_size.is_some() {
+                    return Err("--batch-size may only be supplied once".into());
+                }
+
+                let parsed = value.parse::<usize>()?;
+
+                if parsed == 0 {
+                    return Err("--batch-size must be greater than zero".into());
+                }
+
+                options.batch_size = Some(parsed);
             }
 
             value if value.starts_with("--") => {
@@ -462,7 +483,7 @@ fn print_help() {
            inspect-taskmaster1 <dataset_dir> <output_dir> [--revision SHA]\n\
                                                        Inspect Taskmaster-1 and write qualification reports\n\
            train <dataset|prepared_dir> <tokenizer> <checkpoint> [epochs]\n\
-                 [--validation <path>] [--max-seq-len N]\n\
+                 [--validation <path>] [--max-seq-len N] [--batch-size N]\n\
                                                        Train the autoregressive LM\n\
            verify-checkpoint <dataset> <tokenizer> <checkpoint> [expected_loss]\n\
                                                        Reload and verify model weights\n\
@@ -495,6 +516,7 @@ mod tests {
                 epochs: Some(25),
                 validation: Some("data/val.jsonl".to_owned()),
                 max_seq_len: None,
+                batch_size: None,
             }
         );
     }
@@ -511,6 +533,22 @@ mod tests {
     fn train_options_reject_zero_max_seq_len() {
         let error = parse_train_options(args(&["--max-seq-len", "0"]))
             .expect_err("zero max sequence length must be rejected");
+
+        assert!(error.to_string().contains("greater than zero"));
+    }
+
+    #[test]
+    fn train_options_accept_batch_size() {
+        let parsed =
+            parse_train_options(args(&["--batch-size", "32"])).expect("batch size should parse");
+
+        assert_eq!(parsed.batch_size, Some(32));
+    }
+
+    #[test]
+    fn train_options_reject_zero_batch_size() {
+        let error = parse_train_options(args(&["--batch-size", "0"]))
+            .expect_err("zero batch size must be rejected");
 
         assert!(error.to_string().contains("greater than zero"));
     }

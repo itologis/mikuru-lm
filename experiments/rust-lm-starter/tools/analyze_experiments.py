@@ -151,6 +151,21 @@ def load_experiment(argument: str) -> dict[str, Any]:
     ):
         record[key] = metadata.get(key)
 
+    for key in (
+        "batch_size",
+        "batching_policy",
+        "steps_per_epoch",
+        "total_steps",
+        "step_time_ms_mean",
+        "step_time_ms_max",
+        "epoch_time_s_mean",
+        "epoch_time_s_max",
+        "peak_rss_kb",
+        "swap_kb",
+        "cpu_utilization_percent",
+    ):
+        record[key] = metadata.get(key)
+
     record["_config"] = tuple(metadata.get(key) for key in CONFIG_FIELDS)
     return record
 
@@ -220,6 +235,18 @@ def print_report(records: list[dict[str, Any]]) -> None:
         print(f"  Validation records:{show_value(item['validation_records'], 0):>10}")
         print(f"  Dataset:           {item['dataset_path'] or 'n/a'}")
         print(f"  Split:             {item['split_description'] or 'n/a'}")
+        print(f"  Batching:          {item['batching_policy'] or 'legacy full batch'}")
+        print(f"  Steps:             {show_value(item['total_steps'], 0)}"
+              f" ({show_value(item['steps_per_epoch'], 0)} per epoch)")
+        if item["step_time_ms_mean"] is not None:
+            print(f"  Step time:         mean {show_value(item['step_time_ms_mean'], 2)} ms, "
+                  f"max {show_value(item['step_time_ms_max'], 2)} ms")
+        if item["epoch_time_s_mean"] is not None:
+            print(f"  Epoch time:        mean {show_value(item['epoch_time_s_mean'], 3)} s, "
+                  f"max {show_value(item['epoch_time_s_max'], 3)} s")
+        print(f"  Peak RSS:          {show_value(item['peak_rss_kb'], 0)} kB")
+        print(f"  Swap at end:       {show_value(item['swap_kb'], 0)} kB")
+        print(f"  CPU utilization:   {show_value(item['cpu_utilization_percent'], 1)} %")
 
     configs = {item["_config"] for item in records}
     print("\nINTERPRETATION")
@@ -250,6 +277,16 @@ def write_csv(path: Path, records: list[dict[str, Any]]) -> None:
         "max_seq_len",
         "train_records",
         "validation_records",
+        "batch_size",
+        "steps_per_epoch",
+        "total_steps",
+        "step_time_ms_mean",
+        "step_time_ms_max",
+        "epoch_time_s_mean",
+        "epoch_time_s_max",
+        "peak_rss_kb",
+        "swap_kb",
+        "cpu_utilization_percent",
         "dataset_path",
         "metadata_file",
         "checkpoint_file",
