@@ -74,6 +74,30 @@ def extract_continuation(stdout: str) -> str | None:
     return stdout[marker + len(GENERATED_MARKER) :].strip("\n")
 
 
+def classify_stdout(stdout: str) -> dict[str, Any]:
+    """Turn raw ``generate`` stdout into a result record.
+
+    An empty continuation is a **failure**, not a successful run: the model
+    ended on EOS before emitting any text. Recording it as ``ok`` would hide
+    exactly the behaviour the harness exists to expose (the Japanese prompt
+    on the mini-batch model already does this).
+    """
+    text = extract_continuation(stdout)
+    if text is None:
+        return {
+            "ok": False,
+            "error": f"missing `{GENERATED_MARKER}` in output",
+            "text": None,
+        }
+    if not text.strip():
+        return {
+            "ok": False,
+            "error": "empty generation (model emitted EOS before producing text)",
+            "text": "",
+        }
+    return {"ok": True, "error": None, "text": text}
+
+
 def run_generate(
     binary: Path,
     tokenizer: Path,
@@ -109,14 +133,7 @@ def run_generate(
             "text": None,
         }
 
-    text = extract_continuation(completed.stdout)
-    if text is None:
-        return {
-            "ok": False,
-            "error": f"missing `{GENERATED_MARKER}` in output",
-            "text": None,
-        }
-    return {"ok": True, "error": None, "text": text}
+    return classify_stdout(completed.stdout)
 
 
 def format_metric(value: Any, digits: int = 5) -> str:

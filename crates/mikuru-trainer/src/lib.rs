@@ -1390,6 +1390,35 @@ mod tests {
     }
 
     #[test]
+    fn build_batch_shifts_targets_and_pads_the_short_row() {
+        let device = Device::flex();
+
+        // Sequence A: [10, 11, 12] → input [10, 11], target [11, 12].
+        // Sequence B: [20, 21]     → input [20, PAD], target [21, PAD].
+        let sequences = vec![vec![10, 11, 12], vec![20, 21]];
+        let (inputs, targets, batch_size, sequence_length) =
+            build_batch(&sequences, 0, &device).expect("batch should build");
+
+        assert_eq!((batch_size, sequence_length), (2, 2));
+
+        let input_values = inputs
+            .into_data()
+            .to_vec::<i32>()
+            .expect("inputs should convert");
+        let target_values = targets
+            .into_data()
+            .to_vec::<i32>()
+            .expect("targets should convert");
+
+        assert_eq!(input_values, vec![10, 11, 20, 0]);
+        assert_eq!(
+            target_values,
+            vec![11, 12, 21, 0],
+            "targets must be the next token for every position; PAD rows use PAD targets"
+        );
+    }
+
+    #[test]
     fn mini_batch_training_records_steps_and_keeps_validation_read_only() {
         let dir = temp_dir("mini-batch");
 
