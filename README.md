@@ -135,6 +135,19 @@ cargo run -p mikuru-cli -- inspect-taskmaster1 \
    without `--max-seq-len`, using `artifacts/mikuru-bpe.json` and
    `data/prepared/v1`.
 
+   **Mini-batch training (opt-in).** `--batch-size N` performs one optimizer
+   step per batch and shuffles the record order once per epoch with a
+   deterministic seed-derived permutation (ADR 0005). Without the flag, the
+   legacy full-batch path is unchanged. Checkpoint metadata records the batching
+   policy, steps, step/epoch time, peak RSS, swap, and CPU utilisation. Compare
+   mini-batch runs by **total steps** or wall time, not by epoch count.
+
+   ```bash
+   cargo run -p mikuru-cli -- train \
+     data/prepared/v2 artifacts/mikuru-bpe-v2.json artifacts/oasst1-v2-mb32 50 \
+     --max-seq-len 288 --batch-size 32
+   ```
+
 7. **Verify and generate** as before:
 
    ```bash

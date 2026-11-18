@@ -14,7 +14,9 @@
 use std::{
     error::Error,
     fs, io,
+    ops::Range,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use burn::{
@@ -56,6 +58,13 @@ pub struct TrainerConfig {
     /// reproducible on this backend. The seed is still stored so future
     /// backends can honour it.
     pub seed: u64,
+    /// Mini-batch size.
+    ///
+    /// `None` preserves the legacy behaviour: one padded batch containing
+    /// every training record, visited in dataset order with no shuffling.
+    /// `Some(n)` performs one optimizer update per batch and shuffles the
+    /// record order once per epoch using [`shuffled_indices`].
+    pub batch_size: Option<usize>,
 }
 
 impl Default for TrainerConfig {
@@ -68,6 +77,7 @@ impl Default for TrainerConfig {
             num_heads: 4,
             max_seq_len: 128,
             seed: 42,
+            batch_size: None,
         }
     }
 }
@@ -125,6 +135,37 @@ struct CheckpointMetadata {
     early_stopping_patience: Option<usize>,
     #[serde(default)]
     early_stopping_min_delta: Option<f32>,
+    #[serde(default)]
+    batch_size: Option<usize>,
+    #[serde(default)]
+    batching_policy: Option<String>,
+    #[serde(default)]
+    steps_per_epoch: Option<usize>,
+    #[serde(default)]
+    total_steps: Option<usize>,
+    #[serde(default)]
+    step_time_ms_mean: Option<f32>,
+    #[serde(default)]
+    step_time_ms_max: Option<f32>,
+    #[serde(default)]
+    epoch_time_s_mean: Option<f64>,
+    #[serde(default)]
+    epoch_time_s_max: Option<f64>,
+    /// Peak resident set size (`VmHWM`), reported in kB by the kernel.
+    #[serde(default)]
+    peak_rss_kb: Option<u64>,
+    /// Resident swap at the end of training (`VmSwap`), in kB.
+    ///
+    /// The kernel does not expose a peak-swap-per-process field, so this is a
+    /// point-in-time value rather than a maximum.
+    #[serde(default)]
+    swap_kb: Option<u64>,
+    /// Process CPU utilisation during the training loop, in percent.
+    ///
+    /// Derived from `/proc/self/stat` utime+stime ticks. Linux `USER_HZ` is
+    /// assumed to be 100, which is the conventional value but not universal.
+    #[serde(default)]
+    cpu_utilization_percent: Option<f32>,
 }
 
 /// Resolved dataset contents after split handling.
@@ -402,6 +443,88 @@ fn evaluate_loss(
     Ok(loss)
 }
 
+/// SplitMix64 step used by the deterministic shuffle.
+///
+/// Chosen because it is tiny, dependency-free, and well-defined; the shuffle
+/// only needs to be reproducible, not cryptographic.
+fn splitmix64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
+}
+
+/// Returns a deterministic permutation of `0..len` for one epoch.
+///
+/// Policy (documented in ADR 0005): Fisher-Yates driven by SplitMix64, seeded
+/// with `seed ^ (epoch * 0x9E3779B97F4A7C15)`. Every record appears exactly
+/// once; the same seed and epoch always produce the same order.
+fn shuffled_indices(len: usize, seed: u64, epoch: usize) -> Vec<usize> {
+    let mut state = seed ^ (epoch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut indices = (0..len).collect::<Vec<_>>();
+
+    for upper in (1..len).rev() {
+        let pick = (splitmix64(&mut state) % (upper as u64 + 1)) as usize;
+        indices.swap(upper, pick);
+    }
+
+    indices
+}
+
+/// Splits `0..len` into contiguous chunks of at most `batch_size`.
+///
+/// The final chunk is shorter when `len` is not divisible by `batch_size`.
+/// `batch_size` must be greater than zero; callers validate configuration.
+fn batch_ranges(len: usize, batch_size: usize) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+
+    while start < len {
+        let end = (start + batch_size).min(len);
+        ranges.push(start..end);
+        start = end;
+    }
+
+    ranges
+}
+
+/// Reads utime+stime ticks for this process from `/proc/self/stat`.
+fn process_cpu_ticks() -> Option<u64> {
+    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+
+    // The second field is the executable name and may contain spaces or
+    // parentheses, so parse from the final `)`.
+    let fields = stat
+        .rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+
+    // After the name, index 0 is `state` (field 3). utime is field 14 and
+    // stime is field 15, so they land at indices 11 and 12.
+    let user = fields.get(11)?.parse::<u64>().ok()?;
+    let system = fields.get(12)?.parse::<u64>().ok()?;
+
+    Some(user + system)
+}
+
+/// Reads a kB value from `/proc/self/status`, e.g. `VmHWM`.
+fn status_kb(key: &str) -> Option<u64> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+
+    status.lines().find_map(|line| {
+        let (name, rest) = line.split_once(':')?;
+
+        if name != key {
+            return None;
+        }
+
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
 /// Trains on a JSONL dataset without an explicit validation file.
 ///
 /// If the dataset records carry split labels they are respected. If they do
@@ -428,6 +551,10 @@ pub fn train_jsonl_with_validation(
 ) -> TrainerResult<TrainingReport> {
     if config.epochs == 0 {
         return Err(invalid_input("Epoch count must be greater than zero"));
+    }
+
+    if config.batch_size == Some(0) {
+        return Err(invalid_input("Mini-batch size must be greater than zero"));
     }
 
     if !config.learning_rate.is_finite() || config.learning_rate <= 0.0 {
@@ -496,21 +623,33 @@ pub fn train_jsonl_with_validation(
     let device = Device::flex().autodiff();
     device.seed(config.seed);
 
-    let (inputs, targets, batch_size, sequence_length) =
-        build_batch(&train_sequences, pad_id, &device)?;
-
     let mut model = TransformerModel::new(&model_config, &device).map_err(io::Error::other)?;
 
     let mut optimizer = AdamWConfig::new().with_weight_decay(0.01).init();
 
     let loss_function = CrossEntropyLoss::new(Some(pad_id as usize), &device);
 
+    let batching_policy = match config.batch_size {
+        None => "full-batch (legacy: one padded batch per epoch, no shuffling)".to_owned(),
+        Some(size) => format!(
+            "mini-batch size {size}, deterministic per-epoch shuffle (SplitMix64, seed {})",
+            config.seed
+        ),
+    };
+
+    let steps_per_epoch = batch_ranges(
+        train_sequences.len(),
+        config.batch_size.unwrap_or(train_sequences.len()),
+    )
+    .len();
+
     println!("Backend: Burn Flex CPU");
     println!("Precision: FP32");
     println!("Training records: {}", resolved.train.len());
     println!("Validation records: {}", resolved.validation.len());
     println!("Dataset split: {}", resolved.split_description);
-    println!("Batch shape: [{batch_size}, {sequence_length}]");
+    println!("Batching: {batching_policy}");
+    println!("Steps per epoch: {steps_per_epoch}");
     println!("Vocabulary size: {vocab_size}");
     println!(
         "Transformer: {} layer(s), {} dimensions, {} heads",
@@ -520,12 +659,32 @@ pub fn train_jsonl_with_validation(
     println!("Learning rate: {}", config.learning_rate);
     println!();
 
-    let mut initial_loss = None;
+    // Measured before any optimizer update. On the legacy full-batch path
+    // this is numerically identical to the old first-epoch loss; on the
+    // mini-batch path it reports the whole dataset instead of one batch.
+    let initial_loss = Some(evaluate_loss(
+        &model,
+        &train_sequences,
+        pad_id,
+        &device,
+        vocab_size,
+        &loss_function,
+    )?);
+
     let mut early_stopping = early_stopping::EarlyStopping::default();
     let mut best_validation_loss = None;
     let mut best_epoch = 0usize;
     let mut epochs_completed = 0usize;
     let mut stopped_early = false;
+
+    let cpu_ticks_start = process_cpu_ticks();
+    let wall_start = Instant::now();
+
+    let mut steps_completed = 0usize;
+    let mut step_time_total_ms = 0.0f64;
+    let mut step_time_max_ms = 0.0f64;
+    let mut epoch_time_total_s = 0.0f64;
+    let mut epoch_time_max_s = 0.0f64;
 
     println!(
         "Early stopping: patience={}, min_delta={:.3}",
@@ -535,36 +694,93 @@ pub fn train_jsonl_with_validation(
     println!();
 
     for epoch in 1..=config.epochs {
-        let logits = model.forward(inputs.clone()).map_err(io::Error::other)?;
-        let logits = logits.reshape([batch_size * sequence_length, vocab_size]);
+        let epoch_start = Instant::now();
 
-        let loss = loss_function.forward(logits, targets.clone());
-        let loss_value = loss.clone().into_scalar::<f32>();
+        // The order is fixed for the whole epoch. With the legacy full-batch
+        // path it is the dataset order; with mini-batches it is a seeded
+        // permutation, so runs with the same seed visit identical batches.
+        let order = match config.batch_size {
+            None => (0..train_sequences.len()).collect::<Vec<_>>(),
+            Some(_) => shuffled_indices(train_sequences.len(), config.seed, epoch),
+        };
 
-        if !loss_value.is_finite() {
-            return Err(invalid_input(format!(
-                "Non-finite training loss at epoch {epoch}: {loss_value}"
-            )));
+        let chunk_size = config.batch_size.unwrap_or(train_sequences.len());
+        let mut weighted_loss_sum = 0.0f64;
+        let mut weight_sum = 0usize;
+
+        for range in batch_ranges(order.len(), chunk_size) {
+            // A shuffled mini-batch is not a contiguous slice of the dataset,
+            // so its sequences are cloned into a contiguous vector.
+            let batch = order[range]
+                .iter()
+                .map(|&index| train_sequences[index].clone())
+                .collect::<Vec<_>>();
+
+            // Cross-entropy ignores PAD targets, so every sequence contributes
+            // `len - 1` supervised positions.
+            let weight = batch
+                .iter()
+                .map(|sequence| sequence.len() - 1)
+                .sum::<usize>();
+
+            let (inputs, targets, batch_size, sequence_length) =
+                build_batch(&batch, pad_id, &device)?;
+
+            let step_start = Instant::now();
+            let logits = model.forward(inputs).map_err(io::Error::other)?;
+            let logits = logits.reshape([batch_size * sequence_length, vocab_size]);
+
+            let loss = loss_function.forward(logits, targets);
+            let loss_value = loss.clone().into_scalar::<f32>();
+
+            if !loss_value.is_finite() {
+                return Err(invalid_input(format!(
+                    "Non-finite training loss at epoch {epoch}: {loss_value}"
+                )));
+            }
+
+            let gradients = loss.backward();
+            let gradients = GradientsParams::from_grads(gradients, &model);
+            model = optimizer.step(config.learning_rate, model, gradients);
+
+            let step_ms = step_start.elapsed().as_secs_f64() * 1000.0;
+            step_time_total_ms += step_ms;
+            step_time_max_ms = step_time_max_ms.max(step_ms);
+            steps_completed += 1;
+
+            weighted_loss_sum += f64::from(loss_value) * weight as f64;
+            weight_sum += weight;
         }
 
-        if initial_loss.is_none() {
-            initial_loss = Some(loss_value);
+        if weight_sum == 0 {
+            return Err(invalid_input("Training batches produced no target tokens"));
         }
 
-        let gradients = loss.backward();
-        let gradients = GradientsParams::from_grads(gradients, &model);
-        model = optimizer.step(config.learning_rate, model, gradients);
+        // Token-weighted mean, so a short final batch contributes in
+        // proportion to its supervised positions rather than equally.
+        let loss_value = (weighted_loss_sum / weight_sum as f64) as f32;
         epochs_completed = epoch;
+
+        let epoch_seconds = epoch_start.elapsed().as_secs_f64();
+        epoch_time_total_s += epoch_seconds;
+        epoch_time_max_s = epoch_time_max_s.max(epoch_seconds);
+
+        let step_note = if steps_per_epoch > 1 {
+            format!(" ({steps_per_epoch} steps)")
+        } else {
+            String::new()
+        };
 
         if validation_sequences.is_empty() {
             println!(
-                "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}",
+                "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note}",
                 config.epochs
             );
             continue;
         }
 
-        // Check validation loss after every optimizer update.
+        // Check validation loss after every epoch. This is a forward pass
+        // only and never reaches the optimizer.
         let validation_loss = evaluate_loss(
             &model,
             &validation_sequences,
@@ -585,19 +801,19 @@ pub fn train_jsonl_with_validation(
                     .map_err(io::Error::other)?;
 
                 println!(
-                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5} | validation loss: {validation_loss:.5} | best",
+                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note} | validation loss: {validation_loss:.5} | best",
                     config.epochs
                 );
             }
             early_stopping::EarlyStoppingDecision::Continue => {
                 println!(
-                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5} | validation loss: {validation_loss:.5}",
+                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note} | validation loss: {validation_loss:.5}",
                     config.epochs
                 );
             }
             early_stopping::EarlyStoppingDecision::Stop => {
                 println!(
-                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5} | validation loss: {validation_loss:.5}",
+                    "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note} | validation loss: {validation_loss:.5}",
                     config.epochs
                 );
                 println!(
@@ -609,6 +825,23 @@ pub fn train_jsonl_with_validation(
             }
         }
     }
+
+    let wall_seconds = wall_start.elapsed().as_secs_f64();
+    let cpu_utilization_percent = match (cpu_ticks_start, process_cpu_ticks()) {
+        (Some(start), Some(end)) if wall_seconds > 0.0 && end >= start => {
+            // Linux USER_HZ is conventionally 100; recorded as an assumption.
+            Some(((end - start) as f64 / 100.0 / wall_seconds * 100.0) as f32)
+        }
+        _ => None,
+    };
+    let peak_rss_kb = status_kb("VmHWM");
+    let swap_kb = status_kb("VmSwap");
+    let step_time_ms_mean =
+        (steps_completed > 0).then(|| (step_time_total_ms / steps_completed as f64) as f32);
+    let step_time_ms_max = (steps_completed > 0).then_some(step_time_max_ms as f32);
+    let epoch_time_s_mean =
+        (epochs_completed > 0).then(|| epoch_time_total_s / epochs_completed as f64);
+    let epoch_time_s_max = (epochs_completed > 0).then_some(epoch_time_max_s);
 
     // Without validation data, finish all requested epochs and save the result.
     if validation_sequences.is_empty() {
@@ -671,6 +904,17 @@ pub fn train_jsonl_with_validation(
         early_stopped: Some(stopped_early),
         early_stopping_patience: Some(early_stopping::DEFAULT_PATIENCE),
         early_stopping_min_delta: Some(early_stopping::DEFAULT_MIN_DELTA),
+        batch_size: config.batch_size,
+        batching_policy: Some(batching_policy.clone()),
+        steps_per_epoch: Some(steps_per_epoch),
+        total_steps: Some(steps_completed),
+        step_time_ms_mean,
+        step_time_ms_max,
+        epoch_time_s_mean,
+        epoch_time_s_max,
+        peak_rss_kb,
+        swap_kb,
+        cpu_utilization_percent,
     };
 
     fs::write(&metadata_path, serde_json::to_vec_pretty(&metadata)?)?;
@@ -682,6 +926,24 @@ pub fn train_jsonl_with_validation(
     match final_validation_loss {
         Some(loss) => println!("Final validation loss: {loss:.5}"),
         None => println!("Final validation loss: not evaluated (no validation records)"),
+    }
+
+    println!();
+    println!("Steps: {steps_completed} ({steps_per_epoch} per epoch)");
+
+    if let (Some(mean), Some(max)) = (step_time_ms_mean, step_time_ms_max) {
+        println!("Step time: mean {mean:.2} ms, max {max:.2} ms");
+    }
+
+    if let (Some(mean), Some(max)) = (epoch_time_s_mean, epoch_time_s_max) {
+        println!("Epoch time: mean {mean:.3} s, max {max:.3} s");
+    }
+
+    match (peak_rss_kb, swap_kb, cpu_utilization_percent) {
+        (Some(rss), Some(swap), Some(cpu)) => {
+            println!("Peak RSS: {rss} kB | Swap: {swap} kB | CPU: {cpu:.1}% (USER_HZ assumed 100)")
+        }
+        _ => println!("Peak RSS / swap / CPU: unavailable on this platform"),
     }
 
     println!("Checkpoint:   {}", checkpoint_path.display());
@@ -1087,7 +1349,104 @@ mod tests {
             num_heads: 2,
             max_seq_len: 128,
             seed: 7,
+            batch_size: None,
         }
+    }
+
+    #[test]
+    fn shuffle_is_deterministic_and_visits_every_record_once() {
+        let len = 37;
+        let first = shuffled_indices(len, 42, 1);
+        let second = shuffled_indices(len, 42, 1);
+
+        assert_eq!(
+            first, second,
+            "same seed and epoch must produce the same order"
+        );
+
+        let mut sorted = first.clone();
+        sorted.sort_unstable();
+
+        assert_eq!(sorted, (0..len).collect::<Vec<_>>());
+
+        let next_epoch = shuffled_indices(len, 42, 2);
+
+        assert_ne!(first, next_epoch, "a new epoch must reshuffle");
+    }
+
+    #[test]
+    fn batch_ranges_cover_every_record_once_with_a_short_final_batch() {
+        let ranges = batch_ranges(10, 4);
+
+        assert_eq!(ranges, vec![0..4, 4..8, 8..10]);
+        assert_eq!(
+            ranges.iter().map(|range| range.len()).sum::<usize>(),
+            10,
+            "batch ranges must cover every index exactly once"
+        );
+
+        assert_eq!(batch_ranges(0, 4), Vec::<Range<usize>>::new());
+        assert_eq!(batch_ranges(3, 4), vec![0..3]);
+    }
+
+    #[test]
+    fn mini_batch_training_records_steps_and_keeps_validation_read_only() {
+        let dir = temp_dir("mini-batch");
+
+        let mut records = (1..=5)
+            .map(|index| {
+                conversation(
+                    &format!("train-{index}"),
+                    Some("train"),
+                    "Hello, Mikuru!",
+                    "Hello! What shall we explore today?",
+                )
+            })
+            .collect::<Vec<_>>();
+
+        records.push(conversation(
+            "validation-1",
+            Some("validation"),
+            "How are you today?",
+            "I'm doing well, thank you.",
+        ));
+
+        let input = dir.join("dataset.jsonl");
+        write_jsonl(&input, &records).expect("dataset should be written");
+
+        let tokenizer = build_tokenizer(&dir, &records);
+        let checkpoint = dir.join("mini-model");
+
+        let mut config = test_config(2);
+        config.batch_size = Some(2);
+
+        let report = train_jsonl(&input, &tokenizer, &checkpoint, &config)
+            .expect("mini-batch training should succeed");
+
+        assert_eq!(report.train_examples, 5);
+        assert_eq!(report.validation_examples, 1);
+        assert!(report.final_validation_loss.is_some_and(f32::is_finite));
+
+        let metadata: CheckpointMetadata = serde_json::from_slice(
+            &fs::read(&report.metadata_path).expect("metadata should be readable"),
+        )
+        .expect("metadata should parse");
+
+        assert_eq!(metadata.batch_size, Some(2));
+        assert_eq!(metadata.steps_per_epoch, Some(3));
+        assert_eq!(metadata.total_steps, Some(6));
+        assert!(
+            metadata
+                .batching_policy
+                .as_deref()
+                .is_some_and(|policy| policy.contains("mini-batch size 2"))
+        );
+        assert!(metadata.step_time_ms_mean.is_some());
+        assert!(metadata.epoch_time_s_mean.is_some());
+        assert!(metadata.peak_rss_kb.is_some());
+        assert_eq!(metadata.format_version, 1);
+
+        fs::remove_dir_all(dir).expect("temporary directory should be removed");
     }
 
     #[test]
@@ -1140,6 +1499,12 @@ mod tests {
         assert_eq!(metadata.train_records, Some(2));
         assert_eq!(metadata.validation_records, Some(1));
         assert!(metadata.validation_loss.is_some());
+        assert_eq!(
+            metadata.batch_size, None,
+            "the default path must remain full-batch"
+        );
+        assert_eq!(metadata.steps_per_epoch, Some(1));
+        assert_eq!(metadata.total_steps, Some(2));
 
         let error = train_jsonl(&input, &tokenizer, &checkpoint, &test_config(1))
             .expect_err("existing checkpoint must never be overwritten");
