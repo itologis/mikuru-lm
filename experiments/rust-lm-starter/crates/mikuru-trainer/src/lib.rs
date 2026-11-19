@@ -1403,11 +1403,11 @@ mod tests {
 
         let input_values = inputs
             .into_data()
-            .to_vec::<i32>()
+            .try_to_vec::<i32>()
             .expect("inputs should convert");
         let target_values = targets
             .into_data()
-            .to_vec::<i32>()
+            .try_to_vec::<i32>()
             .expect("targets should convert");
 
         assert_eq!(input_values, vec![10, 11, 20, 0]);
@@ -1416,6 +1416,38 @@ mod tests {
             vec![11, 12, 21, 0],
             "targets must be the next token for every position; PAD rows use PAD targets"
         );
+    }
+
+    #[test]
+    fn generation_stops_on_eos_after_memorising_a_reply() {
+        let dir = temp_dir("generation-eos");
+
+        let records = vec![conversation("solo", Some("train"), "Hello, Mikuru!", "Hi!")];
+
+        let input = dir.join("dataset.jsonl");
+        write_jsonl(&input, &records).expect("dataset should be written");
+
+        let tokenizer = build_tokenizer(&dir, &records);
+        let checkpoint = dir.join("model");
+
+        // One short record, so the run reliably memorises; the point is the
+        // generation loop, not model quality.
+        let config = test_config(300);
+
+        train_jsonl(&input, &tokenizer, &checkpoint, &config)
+            .expect("memorisation run should succeed");
+
+        let generated =
+            generate_from_checkpoint(&tokenizer, &checkpoint, "Hello, Mikuru!", 16, false)
+                .expect("generation should succeed");
+
+        assert_eq!(
+            generated.trim(),
+            "Hi!",
+            "the model should reproduce the learned reply and stop on EOS"
+        );
+
+        fs::remove_dir_all(dir).expect("temporary directory should be removed");
     }
 
     #[test]

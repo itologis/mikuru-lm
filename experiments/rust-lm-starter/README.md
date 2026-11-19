@@ -242,16 +242,37 @@ docs/
   initialisation is not reproducible on this backend; checkpoint metadata still
   records the requested seed for future backends. Split generation *is*
   reproducible.
-- Training processes one padded batch per split (no shuffling or mini-batches).
-  This is deliberate for the first experiments, but it caps the practical corpus
-  size: v2 is 301 training records and maxes out at 272 tokens per record.
+- Mini-batching is opt-in (`--batch-size N`, ADR 0005); the legacy path still
+  processes one padded batch per epoch. Each batch is padded to its longest
+  sequence, and v2 maxes out at 272 tokens per record.
 - v2 requires `--max-seq-len 288` with `artifacts/mikuru-bpe-v2.json`; the
   default 128 will reject every v2 conversation by design. Raising the corpus
   budget further needs larger contexts and real batching, not a bigger download.
 - Generation is greedy and re-runs the full context each token (no KV cache).
+- The v2 corpus is 335 English conversations (~110k characters). The current
+  200,640-parameter model is far below the capacity needed for fluent
+  open-domain conversation; improving validation loss does not imply coherent
+  free-running text at this scale.
+- Japanese prompts are out of distribution: no training record is Japanese, so
+  the model may answer with an immediate EOS (empty continuation). This is a
+  data-coverage limitation, not a tokenizer failure — the tokenizer round-trips
+  Japanese exactly.
 - Checkpoints are Burnpack `.bpk` files; see the implementation note above.
 
 ## Current status
+
+The training and inference pipeline is mechanically verified. A two-record
+memorization run drove train loss from 7.13896 to 0.01484 and regenerated the
+training reply verbatim, ending on EOS — so extraction, tokenization, shifted
+targets, causal attention, checkpointing, and generation all work end to end.
+
+The v2 checkpoints still produce incoherent free-running text. The audit found
+no tokenizer, preprocessing, masking, padding, alignment, or generation-loop
+defect; the cause is scale and training budget (301 English conversations,
+~200k parameters, tens of optimizer steps) plus the usual gap between
+teacher-forced loss and greedy generation. See the Phase 3 audit note and the
+2026-11-19 development log. The next experiment is a controlled comparison at an
+equal update budget, not a larger model.
 
 See [`docs/plan/stage-0.md`](docs/plan/stage-0.md),
 [ADR 0001](docs/decisions/0001-initial-stack.md),

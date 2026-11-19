@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased - 2026-11-19
+
+- Fixed the evaluation harness: an empty continuation is now recorded as a
+  failure (`ok: false` with an explicit "empty generation" error) instead of a
+  successful run. Added `tools/preprocess/tests/test_eval_suite.py`.
+- Added transformer regression tests proving that causal attention ignores
+  future tokens and that right padding does not change real-token predictions.
+- Added a trainer test pinning the shifted input/target layout and PAD targets
+  for a short final row.
+- Audited the pipeline end-to-end with a two-record memorization run: train loss
+  7.13896 → 0.01484 and exact regeneration of the training reply, ending on EOS.
+
 ## Unreleased - 2026-11-18
 
 - Added opt-in deterministic mini-batch training (`train --batch-size N`).
