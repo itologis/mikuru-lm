@@ -407,6 +407,7 @@ pub fn continue_training_from_checkpoint(
         validation_examples: resolved.validation.len(),
         epochs: completed_epochs.saturating_add(epochs_attempted),
         initial_loss,
+        initial_validation_loss: None,
         final_train_loss,
         final_validation_loss,
         checkpoint_path: output_model_path,

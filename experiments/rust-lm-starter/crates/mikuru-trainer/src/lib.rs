@@ -88,6 +88,7 @@ pub struct TrainingReport {
     pub validation_examples: usize,
     pub epochs: usize,
     pub initial_loss: f32,
+    pub initial_validation_loss: Option<f32>,
     pub final_train_loss: f32,
     pub final_validation_loss: Option<f32>,
     pub checkpoint_path: PathBuf,
@@ -121,6 +122,9 @@ struct CheckpointMetadata {
     validation_records: Option<usize>,
     #[serde(default)]
     initial_loss: Option<f32>,
+    /// Validation loss measured before the first optimizer update.
+    #[serde(default)]
+    initial_validation_loss: Option<f32>,
     #[serde(default)]
     final_loss: Option<f32>,
     #[serde(default)]
@@ -151,6 +155,21 @@ struct CheckpointMetadata {
     epoch_time_s_mean: Option<f64>,
     #[serde(default)]
     epoch_time_s_max: Option<f64>,
+    /// End-to-end training wall time in seconds, including validation passes.
+    #[serde(default)]
+    total_train_time_s: Option<f64>,
+    /// Per-epoch training loss, one entry per completed epoch.
+    #[serde(default)]
+    train_loss_history: Option<Vec<f32>>,
+    /// Per-epoch validation loss, one entry per completed epoch.
+    #[serde(default)]
+    validation_loss_history: Option<Vec<f32>>,
+    /// Per-update training loss in execution order.
+    ///
+    /// `len()` equals [`Self::total_steps`]; with mini-batches each entry is
+    /// one optimizer update, and with the legacy path each entry is one epoch.
+    #[serde(default)]
+    step_losses: Option<Vec<f32>>,
     /// Peak resident set size (`VmHWM`), reported in kB by the kernel.
     #[serde(default)]
     peak_rss_kb: Option<u64>,
@@ -671,6 +690,25 @@ pub fn train_jsonl_with_validation(
         &loss_function,
     )?);
 
+    // Measured before any optimizer update, so batch-size changes can be
+    // compared from a like-for-like starting point on both splits.
+    let initial_validation_loss = if validation_sequences.is_empty() {
+        None
+    } else {
+        Some(evaluate_loss(
+            &model,
+            &validation_sequences,
+            pad_id,
+            &device,
+            vocab_size,
+            &loss_function,
+        )?)
+    };
+
+    let mut step_losses = Vec::with_capacity(steps_per_epoch * config.epochs);
+    let mut train_loss_history = Vec::with_capacity(config.epochs);
+    let mut validation_loss_history = Vec::new();
+
     let mut early_stopping = early_stopping::EarlyStopping::default();
     let mut best_validation_loss = None;
     let mut best_epoch = 0usize;
@@ -739,6 +777,8 @@ pub fn train_jsonl_with_validation(
                 )));
             }
 
+            step_losses.push(loss_value);
+
             let gradients = loss.backward();
             let gradients = GradientsParams::from_grads(gradients, &model);
             model = optimizer.step(config.learning_rate, model, gradients);
@@ -760,6 +800,7 @@ pub fn train_jsonl_with_validation(
         // proportion to its supervised positions rather than equally.
         let loss_value = (weighted_loss_sum / weight_sum as f64) as f32;
         epochs_completed = epoch;
+        train_loss_history.push(loss_value);
 
         let epoch_seconds = epoch_start.elapsed().as_secs_f64();
         epoch_time_total_s += epoch_seconds;
@@ -789,6 +830,7 @@ pub fn train_jsonl_with_validation(
             vocab_size,
             &loss_function,
         )?;
+        validation_loss_history.push(validation_loss);
 
         match early_stopping.observe(validation_loss) {
             early_stopping::EarlyStoppingDecision::Improved => {
@@ -897,6 +939,7 @@ pub fn train_jsonl_with_validation(
         train_records: Some(resolved.train.len()),
         validation_records: Some(resolved.validation.len()),
         initial_loss: Some(initial_loss),
+        initial_validation_loss,
         final_loss: Some(final_train_loss),
         validation_loss: final_validation_loss,
         epochs_attempted: Some(epochs_completed),
@@ -912,6 +955,10 @@ pub fn train_jsonl_with_validation(
         step_time_ms_max,
         epoch_time_s_mean,
         epoch_time_s_max,
+        total_train_time_s: Some(wall_seconds),
+        train_loss_history: Some(train_loss_history),
+        validation_loss_history: Some(validation_loss_history),
+        step_losses: Some(step_losses),
         peak_rss_kb,
         swap_kb,
         cpu_utilization_percent,
@@ -921,6 +968,10 @@ pub fn train_jsonl_with_validation(
 
     println!();
     println!("Initial train loss: {initial_loss:.5}");
+    match initial_validation_loss {
+        Some(loss) => println!("Initial validation loss: {loss:.5}"),
+        None => println!("Initial validation loss: not evaluated (no validation records)"),
+    }
     println!("Final train loss:   {final_train_loss:.5}");
 
     match final_validation_loss {
@@ -954,6 +1005,7 @@ pub fn train_jsonl_with_validation(
         validation_examples: resolved.validation.len(),
         epochs: epochs_completed,
         initial_loss,
+        initial_validation_loss,
         final_train_loss,
         final_validation_loss,
         checkpoint_path,
@@ -1487,6 +1539,7 @@ mod tests {
         assert_eq!(report.train_examples, 5);
         assert_eq!(report.validation_examples, 1);
         assert!(report.final_validation_loss.is_some_and(f32::is_finite));
+        assert!(report.initial_validation_loss.is_some_and(f32::is_finite));
 
         let metadata: CheckpointMetadata = serde_json::from_slice(
             &fs::read(&report.metadata_path).expect("metadata should be readable"),
@@ -1496,6 +1549,32 @@ mod tests {
         assert_eq!(metadata.batch_size, Some(2));
         assert_eq!(metadata.steps_per_epoch, Some(3));
         assert_eq!(metadata.total_steps, Some(6));
+        assert_eq!(
+            metadata.initial_validation_loss,
+            report.initial_validation_loss
+        );
+        assert!(metadata.total_train_time_s.is_some_and(|s| s > 0.0));
+
+        let step_losses = metadata
+            .step_losses
+            .expect("step losses should be recorded");
+        assert_eq!(
+            step_losses.len(),
+            6,
+            "one loss per optimizer update is required"
+        );
+        assert!(step_losses.iter().all(|loss| loss.is_finite()));
+
+        let train_history = metadata
+            .train_loss_history
+            .expect("train history should be recorded");
+        let validation_history = metadata
+            .validation_loss_history
+            .expect("validation history should be recorded");
+        assert_eq!(train_history.len(), 2);
+        assert_eq!(validation_history.len(), 2);
+        assert!(train_history.iter().all(|loss| loss.is_finite()));
+        assert!(validation_history.iter().all(|loss| loss.is_finite()));
         assert!(
             metadata
                 .batching_policy
@@ -1566,6 +1645,11 @@ mod tests {
         );
         assert_eq!(metadata.steps_per_epoch, Some(1));
         assert_eq!(metadata.total_steps, Some(2));
+        assert_eq!(
+            metadata.step_losses.as_ref().map(Vec::len),
+            Some(2),
+            "the legacy path records one loss per epoch"
+        );
 
         let error = train_jsonl(&input, &tokenizer, &checkpoint, &test_config(1))
             .expect_err("existing checkpoint must never be overwritten");

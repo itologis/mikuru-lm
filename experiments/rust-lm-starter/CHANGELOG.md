@@ -11,6 +11,10 @@
   for a short final row.
 - Audited the pipeline end-to-end with a two-record memorization run: train loss
   7.13896 → 0.01484 and exact regeneration of the training reply, ending on EOS.
+- Recorded additional training measurements in checkpoint metadata:
+  `initial_validation_loss`, `total_train_time_s`, `train_loss_history`,
+  `validation_loss_history`, and per-update `step_losses`. Training math is
+  unchanged; all fields are optional and `format_version` stays 1.
 
 ## Unreleased - 2026-11-18
 
