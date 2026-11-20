@@ -65,6 +65,12 @@ pub struct TrainerConfig {
     /// `Some(n)` performs one optimizer update per batch and shuffles the
     /// record order once per epoch using [`shuffled_indices`].
     pub batch_size: Option<usize>,
+    /// Whether validation plateaus may end training before `epochs`.
+    ///
+    /// Disabling this only for experiments that need a fixed update count
+    /// changes no other training behaviour: the best checkpoint is still
+    /// selected and saved on every validation improvement.
+    pub early_stopping: bool,
 }
 
 impl Default for TrainerConfig {
@@ -78,6 +84,7 @@ impl Default for TrainerConfig {
             max_seq_len: 128,
             seed: 42,
             batch_size: None,
+            early_stopping: true,
         }
     }
 }
@@ -139,6 +146,11 @@ struct CheckpointMetadata {
     early_stopping_patience: Option<usize>,
     #[serde(default)]
     early_stopping_min_delta: Option<f32>,
+    /// Whether the early-stopping decision could end training.
+    ///
+    /// `false` means the run was configured to complete every requested epoch.
+    #[serde(default)]
+    early_stopping_enabled: Option<bool>,
     #[serde(default)]
     batch_size: Option<usize>,
     #[serde(default)]
@@ -724,11 +736,15 @@ pub fn train_jsonl_with_validation(
     let mut epoch_time_total_s = 0.0f64;
     let mut epoch_time_max_s = 0.0f64;
 
-    println!(
-        "Early stopping: patience={}, min_delta={:.3}",
-        early_stopping::DEFAULT_PATIENCE,
-        early_stopping::DEFAULT_MIN_DELTA
-    );
+    if config.early_stopping {
+        println!(
+            "Early stopping: patience={}, min_delta={:.3}",
+            early_stopping::DEFAULT_PATIENCE,
+            early_stopping::DEFAULT_MIN_DELTA
+        );
+    } else {
+        println!("Early stopping: disabled; training will complete every requested epoch");
+    }
     println!();
 
     for epoch in 1..=config.epochs {
@@ -858,12 +874,14 @@ pub fn train_jsonl_with_validation(
                     "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note} | validation loss: {validation_loss:.5}",
                     config.epochs
                 );
-                println!(
-                    "Early stopping: validation did not improve for {} consecutive epochs.",
-                    early_stopping::DEFAULT_PATIENCE
-                );
-                stopped_early = true;
-                break;
+                if config.early_stopping {
+                    println!(
+                        "Early stopping: validation did not improve for {} consecutive epochs.",
+                        early_stopping::DEFAULT_PATIENCE
+                    );
+                    stopped_early = true;
+                    break;
+                }
             }
         }
     }
@@ -947,6 +965,7 @@ pub fn train_jsonl_with_validation(
         early_stopped: Some(stopped_early),
         early_stopping_patience: Some(early_stopping::DEFAULT_PATIENCE),
         early_stopping_min_delta: Some(early_stopping::DEFAULT_MIN_DELTA),
+        early_stopping_enabled: Some(config.early_stopping),
         batch_size: config.batch_size,
         batching_policy: Some(batching_policy.clone()),
         steps_per_epoch: Some(steps_per_epoch),
@@ -1402,6 +1421,7 @@ mod tests {
             max_seq_len: 128,
             seed: 7,
             batch_size: None,
+            early_stopping: true,
         }
     }
 
@@ -1585,6 +1605,80 @@ mod tests {
         assert!(metadata.epoch_time_s_mean.is_some());
         assert!(metadata.peak_rss_kb.is_some());
         assert_eq!(metadata.format_version, 1);
+
+        fs::remove_dir_all(dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn disabled_early_stopping_completes_every_requested_epoch() {
+        let dir = temp_dir("disabled-early-stopping");
+
+        let records = vec![
+            conversation(
+                "train-1",
+                Some("train"),
+                "Hello, Mikuru!",
+                "Hello! What shall we explore today?",
+            ),
+            conversation(
+                "validation-1",
+                Some("validation"),
+                "How are you today?",
+                "I'm doing well, thank you.",
+            ),
+        ];
+
+        let input = dir.join("dataset.jsonl");
+        write_jsonl(&input, &records).expect("dataset should be written");
+
+        let tokenizer = build_tokenizer(&dir, &records);
+
+        // A near-zero learning rate freezes the weights, so validation loss is
+        // effectively identical every epoch and the patience counter is
+        // deterministic.
+        let mut config = test_config(5);
+        config.learning_rate = 1e-9;
+
+        let full_checkpoint = dir.join("full-model");
+        config.early_stopping = false;
+        train_jsonl(&input, &tokenizer, &full_checkpoint, &config)
+            .expect("training without early stopping should succeed");
+
+        let full_metadata: CheckpointMetadata = serde_json::from_slice(
+            &fs::read(full_checkpoint.with_extension("json")).expect("metadata should be readable"),
+        )
+        .expect("metadata should parse");
+
+        assert_eq!(full_metadata.early_stopping_enabled, Some(false));
+        assert_eq!(full_metadata.early_stopped, Some(false));
+        assert_eq!(full_metadata.epochs_attempted, Some(5));
+        assert_eq!(full_metadata.total_steps, Some(5));
+        assert_eq!(
+            full_metadata
+                .validation_loss_history
+                .expect("validation history should be recorded")
+                .len(),
+            5
+        );
+
+        let stopped_checkpoint = dir.join("stopped-model");
+        config.early_stopping = true;
+        train_jsonl(&input, &tokenizer, &stopped_checkpoint, &config)
+            .expect("training with early stopping should succeed");
+
+        let stopped_metadata: CheckpointMetadata = serde_json::from_slice(
+            &fs::read(stopped_checkpoint.with_extension("json"))
+                .expect("metadata should be readable"),
+        )
+        .expect("metadata should parse");
+
+        assert_eq!(stopped_metadata.early_stopping_enabled, Some(true));
+        assert_eq!(stopped_metadata.early_stopped, Some(true));
+        assert_eq!(
+            stopped_metadata.epochs_attempted,
+            Some(4),
+            "patience 3 must stop after the fourth identical validation loss"
+        );
 
         fs::remove_dir_all(dir).expect("temporary directory should be removed");
     }

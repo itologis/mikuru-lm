@@ -159,6 +159,10 @@ fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
                 config.batch_size = Some(batch_size);
             }
 
+            if options.no_early_stopping {
+                config.early_stopping = false;
+            }
+
             let validation = options.validation.as_deref().map(Path::new);
 
             train_jsonl_with_validation(dataset, validation, tokenizer, checkpoint, &config)?;
@@ -233,6 +237,7 @@ struct TrainOptions {
     validation: Option<String>,
     max_seq_len: Option<usize>,
     batch_size: Option<usize>,
+    no_early_stopping: bool,
 }
 
 /// Parses the optional arguments that follow the three required train paths.
@@ -285,6 +290,14 @@ where
                 }
 
                 options.batch_size = Some(parsed);
+            }
+
+            "--no-early-stopping" => {
+                if options.no_early_stopping {
+                    return Err("--no-early-stopping may only be supplied once".into());
+                }
+
+                options.no_early_stopping = true;
             }
 
             value if value.starts_with("--") => {
@@ -484,6 +497,7 @@ fn print_help() {
                                                        Inspect Taskmaster-1 and write qualification reports\n\
            train <dataset|prepared_dir> <tokenizer> <checkpoint> [epochs]\n\
                  [--validation <path>] [--max-seq-len N] [--batch-size N]\n\
+                 [--no-early-stopping]\n\
                                                        Train the autoregressive LM\n\
            verify-checkpoint <dataset> <tokenizer> <checkpoint> [expected_loss]\n\
                                                        Reload and verify model weights\n\
@@ -517,8 +531,25 @@ mod tests {
                 validation: Some("data/val.jsonl".to_owned()),
                 max_seq_len: None,
                 batch_size: None,
+                no_early_stopping: false,
             }
         );
+    }
+
+    #[test]
+    fn train_options_accept_no_early_stopping() {
+        let parsed = parse_train_options(args(&["--no-early-stopping"]))
+            .expect("no-early-stopping should parse");
+
+        assert!(parsed.no_early_stopping);
+    }
+
+    #[test]
+    fn train_options_reject_duplicate_no_early_stopping() {
+        let error = parse_train_options(args(&["--no-early-stopping", "--no-early-stopping"]))
+            .expect_err("the flag may only be supplied once");
+
+        assert!(error.to_string().contains("only be supplied once"));
     }
 
     #[test]
