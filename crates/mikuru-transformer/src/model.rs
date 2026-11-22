@@ -120,3 +120,103 @@ impl TransformerModel {
         Ok(logits)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Behavioural guards for the autoregressive contract.
+    //!
+    //! Both tests fail if the causal mask leaks information from the right
+    //! (future tokens or padding), which would make every reported loss
+    //! optimistically wrong.
+
+    use burn::tensor::TensorData;
+
+    use super::*;
+
+    fn test_config() -> TransformerConfig {
+        TransformerConfig {
+            vocab_size: 32,
+            model_dim: 32,
+            num_layers: 2,
+            num_heads: 4,
+            max_seq_len: 16,
+        }
+    }
+
+    fn int_tensor(
+        values: &[i64],
+        batch: usize,
+        sequence: usize,
+        device: &Device,
+    ) -> Tensor<2, Int> {
+        Tensor::<2, Int>::from_data(TensorData::new(values.to_vec(), [batch, sequence]), device)
+    }
+
+    fn logits_values(model: &TransformerModel, input: Tensor<2, Int>) -> Vec<f32> {
+        model
+            .forward(input)
+            .expect("forward should succeed")
+            .into_data()
+            .try_to_vec::<f32>()
+            .expect("logits should convert to f32")
+    }
+
+    #[test]
+    fn causal_attention_ignores_future_tokens() {
+        let device = Device::flex();
+        let model = TransformerModel::new(&test_config(), &device).expect("model should build");
+        let vocab = test_config().vocab_size;
+
+        // Identical four-token prefix, different fifth token.
+        let first = logits_values(&model, int_tensor(&[3, 5, 7, 11, 13], 1, 5, &device));
+        let repeat = logits_values(&model, int_tensor(&[3, 5, 7, 11, 13], 1, 5, &device));
+        let changed = logits_values(&model, int_tensor(&[3, 5, 7, 11, 2], 1, 5, &device));
+
+        assert_eq!(first.len(), 5 * vocab);
+        assert_eq!(
+            first, repeat,
+            "the same input must produce identical logits"
+        );
+
+        // Nothing before position 4 may observe token 4.
+        assert_eq!(
+            &first[..4 * vocab],
+            &changed[..4 * vocab],
+            "a future token changed an earlier prediction: the causal mask leaks"
+        );
+
+        // Sanity check that the comparison is not vacuous.
+        assert_ne!(
+            &first[4 * vocab..],
+            &changed[4 * vocab..],
+            "the final token should affect the final prediction"
+        );
+    }
+
+    #[test]
+    fn right_padding_does_not_change_shorter_sequence_logits() {
+        let device = Device::flex();
+        let model = TransformerModel::new(&test_config(), &device).expect("model should build");
+        let vocab = test_config().vocab_size;
+
+        let sequence = [4i64, 6, 8, 2];
+        let pad = 0i64;
+
+        let alone = logits_values(&model, int_tensor(&sequence, 1, 4, &device));
+        let padded = logits_values(
+            &model,
+            int_tensor(
+                &[sequence[0], sequence[1], sequence[2], sequence[3], pad, pad],
+                1,
+                6,
+                &device,
+            ),
+        );
+
+        assert_eq!(
+            alone,
+            padded[..4 * vocab],
+            "right padding changed predictions for the real tokens"
+        );
+    }
+}

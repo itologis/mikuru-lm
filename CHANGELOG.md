@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased - 2026-11-19
+
+- Fixed the evaluation harness: an empty continuation is now recorded as a
+  failure (`ok: false` with an explicit "empty generation" error) instead of a
+  successful run. Added `tools/preprocess/tests/test_eval_suite.py`.
+- Added transformer regression tests proving that causal attention ignores
+  future tokens and that right padding does not change real-token predictions.
+- Added a trainer test pinning the shifted input/target layout and PAD targets
+  for a short final row.
+- Audited the pipeline end-to-end with a two-record memorization run: train loss
+  7.13896 → 0.01484 and exact regeneration of the training reply, ending on EOS.
+- Recorded additional training measurements in checkpoint metadata:
+  `initial_validation_loss`, `total_train_time_s`, `train_loss_history`,
+  `validation_loss_history`, and per-update `step_losses`. Training math is
+  unchanged; all fields are optional and `format_version` stays 1.
+
+## Unreleased - 2026-11-18
+
+- Added opt-in deterministic mini-batch training (`train --batch-size N`).
+  One optimizer step per batch, token-weighted loss, final partial batch
+  included, and a per-epoch Fisher-Yates shuffle driven by SplitMix64
+  (`seed ^ epoch`). The legacy full-batch path remains the default and is
+  unchanged. See `docs/decisions/0005-deterministic-mini-batch-training.md`.
+- Checkpoint metadata now records optional batching and performance fields:
+  `batch_size`, `batching_policy`, `steps_per_epoch`, `total_steps`,
+  step/epoch time, `peak_rss_kb`, `swap_kb`, and `cpu_utilization_percent`.
+  `format_version` stays 1.
+- Continuation runs inherit `batch_size` from the source checkpoint metadata.
+- Added read-only Python audit tools under `tools/preprocess/`:
+  `validate_jsonl.py` (schema mirror with `--stats`/`--json`) and
+  `eval_suite.py` (fixed-prompt checkpoint comparison). Stdlib only; the Rust
+  loader remains the authority.
+- Extended `tools/analyze_experiments.py` to display the new batching and
+  performance fields.
+
 ## Unreleased - 2026-11-16
 
 - Added dataset loading with required-metadata validation, duplicate-id

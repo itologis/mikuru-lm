@@ -109,6 +109,8 @@ pub fn continue_training_from_checkpoint(
         num_heads: metadata.num_heads,
         max_seq_len: metadata.max_seq_len,
         seed: metadata.seed,
+        batch_size: metadata.batch_size,
+        early_stopping: true,
     };
 
     let dataset_path = Path::new(&metadata.dataset_path);
@@ -153,8 +155,15 @@ pub fn continue_training_from_checkpoint(
     let device = Device::flex().autodiff();
     device.seed(config.seed);
 
-    let (inputs, targets, batch_size, sequence_length) =
-        build_batch(&train_sequences, pad_id, &device)?;
+    if config.batch_size == Some(0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Training batch size must be greater than zero",
+        )
+        .into());
+    }
+
+    let evaluation_batch_size = config.batch_size.unwrap_or(16);
 
     let model = TransformerModel::new(&model_config, &device).map_err(io::Error::other)?;
     let mut model = model
@@ -177,13 +186,15 @@ pub fn continue_training_from_checkpoint(
     }
 
     let loss_function = CrossEntropyLoss::new(Some(pad_id as usize), &device);
-    let initial_logits = model
-        .forward(inputs.clone())
-        .map_err(io::Error::other)?
-        .reshape([batch_size * sequence_length, vocab_size]);
-    let initial_loss = loss_function
-        .forward(initial_logits, targets.clone())
-        .into_scalar::<f32>();
+    let initial_loss = evaluate_loss(
+        &model,
+        &train_sequences,
+        pad_id,
+        &device,
+        vocab_size,
+        &loss_function,
+        evaluation_batch_size,
+    )?;
 
     if !initial_loss.is_finite() {
         return Err(io::Error::new(
@@ -214,6 +225,7 @@ pub fn continue_training_from_checkpoint(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?)
     };
 
@@ -238,28 +250,65 @@ pub fn continue_training_from_checkpoint(
     }
 
     for local_epoch in 1..=additional_epochs {
-        let logits = model
-            .forward(inputs.clone())
-            .map_err(io::Error::other)?
-            .reshape([batch_size * sequence_length, vocab_size]);
+        let global_epoch = completed_epochs + local_epoch;
 
-        let loss = loss_function.forward(logits, targets.clone());
-        let epoch_loss = loss.clone().into_scalar::<f32>();
+        let order = match config.batch_size {
+            None => (0..train_sequences.len()).collect::<Vec<_>>(),
+            Some(_) => shuffled_indices(train_sequences.len(), config.seed, global_epoch),
+        };
 
-        if !epoch_loss.is_finite() {
+        let chunk_size = config.batch_size.unwrap_or(train_sequences.len());
+        let mut weighted_loss_sum = 0.0f64;
+        let mut weight_sum = 0usize;
+
+        for range in batch_ranges(order.len(), chunk_size) {
+            let batch = order[range]
+                .iter()
+                .map(|&index| train_sequences[index].clone())
+                .collect::<Vec<_>>();
+
+            let weight = batch
+                .iter()
+                .map(|sequence| sequence.len() - 1)
+                .sum::<usize>();
+
+            let (inputs, targets, batch_size, sequence_length) =
+                build_batch(&batch, pad_id, &device)?;
+
+            let logits = model
+                .forward(inputs)
+                .map_err(io::Error::other)?
+                .reshape([batch_size * sequence_length, vocab_size]);
+
+            let loss = loss_function.forward(logits, targets);
+            let loss_value = loss.clone().into_scalar::<f32>();
+
+            if !loss_value.is_finite() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Non-finite training loss at continuation epoch {global_epoch}"),
+                )
+                .into());
+            }
+
+            let gradients = loss.backward();
+            let gradients = GradientsParams::from_grads(gradients, &model);
+            model = optimizer.step(config.learning_rate, model, gradients);
+
+            weighted_loss_sum += f64::from(loss_value) * weight as f64;
+            weight_sum += weight;
+        }
+
+        if weight_sum == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Non-finite training loss at continuation epoch {local_epoch}"),
+                "Continuation training produced no target tokens",
             )
             .into());
         }
 
-        let gradients = loss.backward();
-        let gradients = GradientsParams::from_grads(gradients, &model);
-        model = optimizer.step(config.learning_rate, model, gradients);
-
+        let epoch_loss = (weighted_loss_sum / weight_sum as f64) as f32;
         epochs_attempted = local_epoch;
-        let global_epoch = completed_epochs + local_epoch;
 
         if validation_sequences.is_empty() {
             println!("[Epoch {global_epoch}/{total_epochs}] train loss: {epoch_loss:.5}");
@@ -273,6 +322,7 @@ pub fn continue_training_from_checkpoint(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?;
 
         match early_stopping.observe(validation_loss) {
@@ -334,6 +384,7 @@ pub fn continue_training_from_checkpoint(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?;
 
         final_validation_loss = None;
@@ -351,6 +402,7 @@ pub fn continue_training_from_checkpoint(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?;
 
         final_validation_loss = best_validation_loss;
@@ -406,6 +458,7 @@ pub fn continue_training_from_checkpoint(
         validation_examples: resolved.validation.len(),
         epochs: completed_epochs.saturating_add(epochs_attempted),
         initial_loss,
+        initial_validation_loss: None,
         final_train_loss,
         final_validation_loss,
         checkpoint_path: output_model_path,

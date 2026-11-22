@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "split_source": "deterministic",
+  "split_seed": 42,
+  "validation_fraction": 0.1,
+  "train_records": 1747,
+  "validation_records": 195,
+  "sources": [
+    {
+      "source_dataset": "OpenAssistant OASST1",
+      "license": "Apache-2.0",
+      "records": 1942,
+      "synthetic_records": 0
+    }
+  ]
+}
