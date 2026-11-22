@@ -1,0 +1,36 @@
+{
+  "prompts": [
+    {
+      "id": "greeting",
+      "text": "Hello, Mikuru!"
+    },
+    {
+      "id": "identity",
+      "text": "Who are you?"
+    },
+    {
+      "id": "instruction",
+      "text": "Explain what a tokenizer does in one short sentence."
+    },
+    {
+      "id": "japanese",
+      "text": "こんにちは、ミクル。今日は何をしようか？"
+    },
+    {
+      "id": "style",
+      "text": "Write a calm, encouraging reply to someone who is tired."
+    },
+    {
+      "id": "fact",
+      "text": "What is the capital of Japan?"
+    },
+    {
+      "id": "math",
+      "text": "What is 17 + 25?"
+    },
+    {
+      "id": "continuation",
+      "text": "The morning train was quiet, and"
+    }
+  ]
+}
