@@ -1,0 +1,291 @@
+diff --git a/experiments/rust-lm-starter/crates/mikuru-core/src/oasst1.rs b/experiments/rust-lm-starter/crates/mikuru-core/src/oasst1.rs
+index eb88e86..4be0878 100644
+--- a/experiments/rust-lm-starter/crates/mikuru-core/src/oasst1.rs
++++ b/experiments/rust-lm-starter/crates/mikuru-core/src/oasst1.rs
+@@ -377,6 +377,13 @@ fn is_better(candidate: &PathChoice, current: &PathChoice, tree: &[OasstMessage]
+     candidate_ids.cmp(current_ids) == std::cmp::Ordering::Less
+ }
+
++/// Search result: best path within budgets and longest valid path.
++#[derive(Default)]
++struct PathSearch {
++    best: Option<PathChoice>,
++    longest_valid_path_messages: usize,
++}
++
+ /// Outcome of reconstructing one tree.
+ pub struct Reconstruction {
+     pub example: ConversationExample,
+@@ -424,7 +431,7 @@ fn conversation_from_path(
+         source_message_ids: message_ids.clone(),
+         provenance_note: format!(
+             "OASST1 ready export at revision {}; English human-written message path \
+-             selected by highest summed quality; deleted, failed-review, synthetic, \
++             selected by highest summed quality among budget-compatible paths; deleted, failed-review, synthetic, \
+              toxic, and PII-labelled messages excluded; prompter mapped to user; \
+              original message ids preserved.",
+             config.revision
+@@ -507,31 +514,40 @@ pub fn reconstruct_tree(
+
+     let mut visiting = HashSet::new();
+     let mut cycle = false;
+-
+-    let best = walk(root, tree, &children, &accepted, &mut visiting, &mut cycle);
++    let search = walk(
++        root,
++        tree,
++        &children,
++        &accepted,
++        &mut visiting,
++        &mut cycle,
++        config.max_chars,
++        config.max_messages,
++        config.min_messages,
++    );
+
+     if cycle {
+         return Err(TreeReject::Cycle);
+     }
+-
+-    let Some(best) = best else {
+-        return Err(TreeReject::NoValidPath);
+-    };
+-
+-    if best.path.len() < config.min_messages {
++    if search.longest_valid_path_messages < config.min_messages {
+         return Err(TreeReject::TooShort);
+     }
++    let Some(best) = search.best else {
++        return Err(TreeReject::TooLong);
++    };
+
+     let reconstruction = conversation_from_path(&tree[0].message_tree_id, &best.path, tree, config);
+
++    if best.path.len() < config.min_messages {
++        return Err(TreeReject::TooShort);
++    }
+     if best.path.len() > config.max_messages || reconstruction.characters > config.max_chars {
+         return Err(TreeReject::TooLong);
+     }
+-
+     Ok(reconstruction)
+ }
+
+-/// Depth-first search for the best accepted path starting at `position`.
++/// Finds the highest-scoring path that satisfies the configured budgets.
+ fn walk(
+     position: usize,
+     tree: &[OasstMessage],
+@@ -539,29 +555,58 @@ fn walk(
+     accepted: &[bool],
+     visiting: &mut HashSet<usize>,
+     cycle: &mut bool,
+-) -> Option<PathChoice> {
++    remaining_chars: usize,
++    remaining_messages: usize,
++    minimum_messages: usize,
++) -> PathSearch {
+     if !accepted[position] {
+-        return None;
++        return PathSearch::default();
+     }
+-
+     if !visiting.insert(position) {
+         *cycle = true;
+-        return None;
++        return PathSearch::default();
+     }
+
+-    let mut best = PathChoice {
+-        score: quality(&tree[position]),
+-        path: vec![position],
++    let chars = tree[position].text.chars().count();
++    let fits = remaining_messages > 0 && chars <= remaining_chars;
++
++    let mut best = if fits && minimum_messages <= 1 {
++        Some(PathChoice {
++            score: quality(&tree[position]),
++            path: vec![position],
++        })
++    } else {
++        None
+     };
+
++    let mut longest = 1;
++
+     if let Some(siblings) = children.get(&position) {
+         for &child in siblings {
+-            // Roles must alternate: prompter and assistant reply to each other.
+             if tree[child].role == tree[position].role {
+                 continue;
+             }
+
+-            let Some(candidate) = walk(child, tree, children, accepted, visiting, cycle) else {
++            let result = walk(
++                child,
++                tree,
++                children,
++                accepted,
++                visiting,
++                cycle,
++                remaining_chars.saturating_sub(chars),
++                remaining_messages.saturating_sub(1),
++                minimum_messages.saturating_sub(1),
++            );
++
++            if result.longest_valid_path_messages > 0 {
++                longest = longest.max(result.longest_valid_path_messages + 1);
++            }
++
++            if !fits {
++                continue;
++            }
++            let Some(candidate) = result.best else {
+                 continue;
+             };
+
+@@ -569,19 +614,25 @@ fn walk(
+             path.push(position);
+             path.extend(candidate.path);
+
+-            let score = quality(&tree[position]) + candidate.score;
+-
+-            let choice = PathChoice { score, path };
++            let choice = PathChoice {
++                score: quality(&tree[position]) + candidate.score,
++                path,
++            };
+
+-            if is_better(&choice, &best, tree) {
+-                best = choice;
++            if best
++                .as_ref()
++                .is_none_or(|current| is_better(&choice, current, tree))
++            {
++                best = Some(choice);
+             }
+         }
+     }
+
+     visiting.remove(&position);
+-
+-    Some(best)
++    PathSearch {
++        best,
++        longest_valid_path_messages: longest,
++    }
+ }
+
+ /// Result of an import run.
+@@ -1039,7 +1090,6 @@ mod tests {
+     #[test]
+     fn rejects_conversations_over_the_message_budget() {
+         let mut tree = vec![message("m0", None, "prompter", "q0", 0.0)];
+-
+         for index in 1..10 {
+             let role = if index % 2 == 1 {
+                 "assistant"
+@@ -1055,15 +1105,15 @@ mod tests {
+                 0.0,
+             ));
+         }
+-
+         let config = OasstImportConfig {
+             max_messages: 8,
++            min_messages: 9,
+             ..OasstImportConfig::default()
+         };
+-
+-        let result = reconstruct_tree(&tree, &config);
+-
+-        assert!(matches!(result, Err(TreeReject::TooLong)));
++        assert!(matches!(
++            reconstruct_tree(&tree, &config),
++            Err(TreeReject::TooLong)
++        ));
+     }
+
+     #[test]
+@@ -1114,6 +1164,83 @@ mod tests {
+         assert!(matches!(result, Err(TreeReject::MissingRoot)));
+     }
+
++    #[test]
++    fn selects_shorter_valid_branch_when_best_branch_exceeds_budget() {
++        let long = "L".repeat(300);
++        let tree = vec![
++            message("root", None, "prompter", "Question?", 0.1),
++            message("long", Some("root"), "assistant", &long, 0.99),
++            message("short", Some("root"), "assistant", "Useful answer.", 0.1),
++        ];
++        let config = OasstImportConfig {
++            max_chars: 100,
++            ..OasstImportConfig::default()
++        };
++        let result = reconstruct_tree(&tree, &config).unwrap();
++        assert_eq!(result.message_ids, ["root", "short"]);
++    }
++
++    #[test]
++    fn keeps_prefix_that_fits_message_budget() {
++        let mut tree = vec![message("m0", None, "prompter", "q0", 0.0)];
++        for index in 1..10 {
++            let role = if index % 2 == 1 {
++                "assistant"
++            } else {
++                "prompter"
++            };
++            let parent = format!("m{}", index - 1);
++            tree.push(message(
++                &format!("m{index}"),
++                Some(&parent),
++                role,
++                &format!("t{index}"),
++                0.0,
++            ));
++        }
++        let config = OasstImportConfig {
++            max_messages: 8,
++            ..OasstImportConfig::default()
++        };
++        let result = reconstruct_tree(&tree, &config).unwrap();
++        assert_eq!(
++            result.message_ids,
++            ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"]
++        );
++    }
++
++    #[test]
++    fn minimum_length_is_applied_before_quality_ranking() {
++        let tree = vec![
++            message("root", None, "prompter", "Question?", 0.0),
++            message("high", Some("root"), "assistant", "Short.", 0.99),
++            message("lower", Some("root"), "assistant", "Another answer.", 0.1),
++            message("follow", Some("lower"), "prompter", "Explain more.", 0.1),
++        ];
++        let config = OasstImportConfig {
++            min_messages: 3,
++            ..OasstImportConfig::default()
++        };
++        let result = reconstruct_tree(&tree, &config).unwrap();
++        assert_eq!(result.message_ids, ["root", "lower", "follow"]);
++    }
++
++    #[test]
++    fn selects_a_character_budget_compatible_prefix() {
++        let tree = vec![
++            message("root", None, "prompter", &"a".repeat(200), 0.0),
++            message("answer", Some("root"), "assistant", &"b".repeat(200), 0.0),
++            message("follow", Some("answer"), "prompter", &"c".repeat(200), 0.0),
++        ];
++        let config = OasstImportConfig {
++            max_chars: 500,
++            ..OasstImportConfig::default()
++        };
++        let result = reconstruct_tree(&tree, &config).unwrap();
++        assert_eq!(result.message_ids, ["root", "answer"]);
++        assert_eq!(result.characters, 400);
++    }
++
+     fn temp_dir(name: &str) -> PathBuf {
+         static COUNTER: AtomicUsize = AtomicUsize::new(0);

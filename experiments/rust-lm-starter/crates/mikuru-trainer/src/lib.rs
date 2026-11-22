@@ -455,23 +455,58 @@ fn evaluate_loss(
     device: &Device,
     vocab_size: usize,
     loss_function: &CrossEntropyLoss,
+    eval_batch_size: usize,
 ) -> TrainerResult<f32> {
-    let (inputs, targets, batch_size, sequence_length) = build_batch(sequences, pad_id, device)?;
-
-    let logits = model
-        .forward(inputs)
-        .map_err(io::Error::other)?
-        .reshape([batch_size * sequence_length, vocab_size]);
-
-    let loss = loss_function.forward(logits, targets).into_scalar::<f32>();
-
-    if !loss.is_finite() {
-        return Err(invalid_input(format!(
-            "Evaluation produced a non-finite loss: {loss}"
-        )));
+    if eval_batch_size == 0 {
+        return Err(invalid_input(
+            "Evaluation batch size must be greater than zero",
+        ));
     }
 
-    Ok(loss)
+    let mut weighted_loss_sum = 0.0f64;
+    let mut total_weight = 0usize;
+
+    for range in batch_ranges(sequences.len(), eval_batch_size) {
+        let batch = &sequences[range];
+
+        let weight = batch
+            .iter()
+            .map(|sequence| sequence.len().saturating_sub(1))
+            .sum::<usize>();
+
+        if weight == 0 {
+            continue;
+        }
+
+        let (loss_value, batch_count) = {
+            let (inputs, targets, batch_count, sequence_length) =
+                build_batch(batch, pad_id, device)?;
+
+            let logits = model
+                .forward(inputs)
+                .map_err(io::Error::other)?
+                .reshape([batch_count * sequence_length, vocab_size]);
+
+            let loss = loss_function.forward(logits, targets).into_scalar::<f32>();
+            (loss, batch_count)
+        };
+
+        if !loss_value.is_finite() {
+            return Err(invalid_input(format!(
+                "Evaluation produced a non-finite loss: {loss_value}"
+            )));
+        }
+
+        weighted_loss_sum += f64::from(loss_value) * weight as f64;
+        total_weight += weight;
+        let _ = batch_count;
+    }
+
+    if total_weight == 0 {
+        return Err(invalid_input("Evaluation produced no target tokens"));
+    }
+
+    Ok((weighted_loss_sum / total_weight as f64) as f32)
 }
 
 /// SplitMix64 step used by the deterministic shuffle.
@@ -693,6 +728,9 @@ pub fn train_jsonl_with_validation(
     // Measured before any optimizer update. On the legacy full-batch path
     // this is numerically identical to the old first-epoch loss; on the
     // mini-batch path it reports the whole dataset instead of one batch.
+    // Bound evaluation memory independently of the training batch policy.
+    let evaluation_batch_size = config.batch_size.unwrap_or(16);
+
     let initial_loss = Some(evaluate_loss(
         &model,
         &train_sequences,
@@ -700,6 +738,7 @@ pub fn train_jsonl_with_validation(
         &device,
         vocab_size,
         &loss_function,
+        evaluation_batch_size,
     )?);
 
     // Measured before any optimizer update, so batch-size changes can be
@@ -714,6 +753,7 @@ pub fn train_jsonl_with_validation(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?)
     };
 
@@ -845,6 +885,7 @@ pub fn train_jsonl_with_validation(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?;
         validation_loss_history.push(validation_loss);
 
@@ -925,6 +966,7 @@ pub fn train_jsonl_with_validation(
         &device,
         vocab_size,
         &loss_function,
+        evaluation_batch_size,
     )?;
 
     let final_validation_loss = if validation_sequences.is_empty() {
@@ -2021,6 +2063,7 @@ mod tests {
             &device,
             vocab_size,
             &loss_function,
+            1,
         )
         .expect("first evaluation should succeed");
 
@@ -2031,6 +2074,7 @@ mod tests {
             &device,
             vocab_size,
             &loss_function,
+            1,
         )
         .expect("second evaluation should succeed");
 
