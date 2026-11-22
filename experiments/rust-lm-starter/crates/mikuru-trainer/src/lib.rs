@@ -1155,6 +1155,173 @@ pub fn verify_checkpoint(
     Ok(loss)
 }
 
+/// Deterministic SplitMix64 generator used for reproducible nucleus sampling.
+///
+/// The sampler must not depend on the backend RNG: evaluation runs are
+/// compared across binaries and machines, so the seed contract lives here.
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut value = self.state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        value ^ (value >> 31)
+    }
+
+    fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64))
+    }
+}
+
+/// Decoding settings for generation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplingConfig {
+    /// Softmax temperature. Ignored when `greedy` is true.
+    pub temperature: f32,
+    /// Nucleus probability mass in `(0, 1]`. Ignored when `greedy` is true.
+    pub top_p: f32,
+    /// Seed for the deterministic sampler.
+    pub seed: u64,
+    /// Greedy argmax decoding. This is the default and the v2 behaviour.
+    pub greedy: bool,
+}
+
+impl SamplingConfig {
+    pub fn greedy() -> Self {
+        Self {
+            temperature: 1.0,
+            top_p: 1.0,
+            seed: 42,
+            greedy: true,
+        }
+    }
+
+    pub fn nucleus(temperature: f32, top_p: f32, seed: u64) -> Self {
+        Self {
+            temperature,
+            top_p,
+            seed,
+            greedy: false,
+        }
+    }
+
+    fn validate(&self) -> TrainerResult<()> {
+        if !self.greedy {
+            if !self.temperature.is_finite() || self.temperature <= 0.0 {
+                return Err(invalid_input(
+                    "temperature must be finite and greater than zero",
+                ));
+            }
+            if !self.top_p.is_finite() || self.top_p <= 0.0 || self.top_p > 1.0 {
+                return Err(invalid_input("top_p must be in (0, 1]"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Why decoding stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationStop {
+    Eos,
+    TokenLimit,
+    StructuralSpecial,
+}
+
+/// A complete generation result, including termination metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Generation {
+    pub text: String,
+    pub prompt_tokens: usize,
+    pub generated_tokens: usize,
+    pub stop_reason: GenerationStop,
+}
+
+/// Picks the next token from logits with either greedy argmax or seeded
+/// nucleus sampling.
+fn sample_next_token(logits: &[f32], config: &SamplingConfig, rng: &mut SplitMix64) -> u32 {
+    debug_assert!(!logits.is_empty());
+
+    if config.greedy {
+        let mut best_index = 0;
+        let mut best_value = f32::NEG_INFINITY;
+        for (index, &value) in logits.iter().enumerate() {
+            if value > best_value {
+                best_value = value;
+                best_index = index;
+            }
+        }
+        return best_index as u32;
+    }
+
+    let temperature = config.temperature as f64;
+    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+
+    let mut ranked = logits
+        .iter()
+        .enumerate()
+        .map(|(index, &logit)| {
+            let weight = ((logit as f64 - max_logit) / temperature).exp();
+            (index, weight)
+        })
+        .collect::<Vec<(usize, f64)>>();
+
+    let total = ranked.iter().map(|(_, weight)| weight).sum::<f64>();
+
+    if !total.is_finite() || total <= 0.0 {
+        // Degenerate logits: fall back to argmax instead of dividing by zero.
+        return sample_next_token(
+            logits,
+            &SamplingConfig {
+                greedy: true,
+                ..*config
+            },
+            rng,
+        );
+    }
+
+    for (_, weight) in &mut ranked {
+        *weight /= total;
+    }
+
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut cumulative = 0.0;
+    let mut cutoff = ranked.len();
+    for (rank, (_, weight)) in ranked.iter().enumerate() {
+        cumulative += weight;
+        if cumulative >= config.top_p as f64 {
+            cutoff = rank + 1;
+            break;
+        }
+    }
+
+    let target = rng.next_f64() * cumulative;
+    let mut running = 0.0;
+    for &(index, weight) in &ranked[..cutoff] {
+        running += weight;
+        if target < running {
+            return index as u32;
+        }
+    }
+
+    ranked[cutoff - 1].0 as u32
+}
+
 /// Generates a continuation using greedy autoregressive decoding.
 ///
 /// Loads a checkpoint and tokenizer, then predicts one token at a time.
@@ -1164,8 +1331,32 @@ pub fn generate_from_checkpoint(
     checkpoint_base: impl AsRef<Path>,
     prompt: &str,
     max_new_tokens: usize,
-    verbose: bool,
+    _verbose: bool,
 ) -> TrainerResult<String> {
+    generate_from_checkpoint_with_sampling(
+        tokenizer_path,
+        checkpoint_base,
+        prompt,
+        max_new_tokens,
+        SamplingConfig::greedy(),
+    )
+    .map(|generation| generation.text)
+}
+
+/// Generates a continuation with explicit decoding settings.
+///
+/// The function is quiet: callers own presentation. Greedy decoding is
+/// bit-identical to the legacy path; nucleus sampling is deterministic for a
+/// given `(prompt, seed, temperature, top_p)` on the same binary and backend.
+pub fn generate_from_checkpoint_with_sampling(
+    tokenizer_path: impl AsRef<Path>,
+    checkpoint_base: impl AsRef<Path>,
+    prompt: &str,
+    max_new_tokens: usize,
+    sampling: SamplingConfig,
+) -> TrainerResult<Generation> {
+    sampling.validate()?;
+
     if prompt.trim().is_empty() {
         return Err(invalid_input("Prompt must not be empty"));
     }
@@ -1252,15 +1443,12 @@ pub fn generate_from_checkpoint(
         .try_load_file(&checkpoint_path)
         .map_err(io::Error::other)?;
 
+    let prompt_tokens = context_ids.len();
     let mut generated_ids = Vec::with_capacity(max_new_tokens);
-    let mut stop_reason: Option<&str> = None;
+    let mut stop_reason = GenerationStop::TokenLimit;
+    let mut rng = SplitMix64::new(sampling.seed);
 
-    println!("Loaded checkpoint: {}", checkpoint_path.display());
-    println!("Prompt tokens: {}", context_ids.len());
-    println!("Generating up to {max_new_tokens} tokens...");
-    println!();
-
-    for step in 0..max_new_tokens {
+    for _ in 0..max_new_tokens {
         // Keep only the most recent context that fits the model.
         let context_start = context_ids.len().saturating_sub(metadata.max_seq_len);
 
@@ -1285,14 +1473,14 @@ pub fn generate_from_checkpoint(
         let logits = model.forward(input).map_err(io::Error::other)?;
 
         // Only the final sequence position predicts the next token.
-        let next_token = logits
+        let logits = logits
             .slice([0..1, (context_length - 1)..context_length, 0..vocab_size])
             .reshape([vocab_size])
-            .argmax(0)
-            .into_scalar::<i32>();
+            .into_data()
+            .try_to_vec::<f32>()
+            .map_err(|error| io::Error::other(format!("failed to read logits: {error}")))?;
 
-        let next_id = u32::try_from(next_token)
-            .map_err(|_| invalid_input("Model produced an invalid token ID"))?;
+        let next_id = sample_next_token(&logits, &sampling, &mut rng);
 
         if next_id as usize >= vocab_size {
             return Err(invalid_input(
@@ -1302,33 +1490,27 @@ pub fn generate_from_checkpoint(
 
         // EOS ends generation. Structural special tokens are not emitted.
         if next_id == eos_id {
-            stop_reason = Some("EOS");
+            stop_reason = GenerationStop::Eos;
             break;
         }
 
         if next_id == bos_id || next_id == pad_id || next_id == unk_id {
-            stop_reason = Some("a structural special token");
+            stop_reason = GenerationStop::StructuralSpecial;
             break;
         }
 
         generated_ids.push(next_id);
         context_ids.push(next_id);
-
-        if verbose {
-            println!("Generated token {}/{}", step + 1, max_new_tokens);
-        }
     }
 
-    let generated_text = tokenizer.decode(&generated_ids)?;
+    let text = tokenizer.decode(&generated_ids)?;
 
-    println!();
-
-    match stop_reason {
-        Some(reason) => println!("Generation ended on {reason}."),
-        None => println!("Generation reached the token limit."),
-    }
-
-    Ok(generated_text)
+    Ok(Generation {
+        text,
+        prompt_tokens,
+        generated_tokens: generated_ids.len(),
+        stop_reason,
+    })
 }
 
 #[cfg(test)]
@@ -1488,6 +1670,44 @@ mod tests {
             vec![11, 12, 21, 0],
             "targets must be the next token for every position; PAD rows use PAD targets"
         );
+    }
+
+    #[test]
+    fn nucleus_sampling_is_deterministic_and_seed_sensitive() {
+        let logits = vec![0.1, 1.2, -0.4, 2.0, 0.3, 0.05, 1.8, -1.0];
+        let config = SamplingConfig::nucleus(0.9, 0.9, 1234);
+
+        let draw = |seed: u64| {
+            let mut rng = SplitMix64::new(seed);
+            (0..128)
+                .map(|_| sample_next_token(&logits, &config, &mut rng))
+                .collect::<Vec<u32>>()
+        };
+
+        let first = draw(1234);
+        let second = draw(1234);
+
+        assert_eq!(first, second, "same seed must reproduce the same sample");
+        assert!(
+            first.iter().all(|&token| (token as usize) < logits.len()),
+            "sampled token IDs must stay inside the vocabulary"
+        );
+        assert_ne!(
+            first,
+            draw(99),
+            "different seeds should explore differently"
+        );
+
+        let mut rng = SplitMix64::new(7);
+        assert_eq!(
+            sample_next_token(&logits, &SamplingConfig::greedy(), &mut rng),
+            3,
+            "greedy decoding must select the largest logit"
+        );
+
+        assert!(SamplingConfig::nucleus(0.0, 0.9, 1).validate().is_err());
+        assert!(SamplingConfig::nucleus(0.8, 0.0, 1).validate().is_err());
+        assert!(SamplingConfig::nucleus(0.8, 1.01, 1).validate().is_err());
     }
 
     #[test]

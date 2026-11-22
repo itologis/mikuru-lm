@@ -6,7 +6,7 @@ use mikuru_core::dataset::{
 use mikuru_core::oasst1::OasstImportConfig;
 use mikuru_core::taskmaster1::Taskmaster1InspectConfig;
 use mikuru_trainer::continue_training_from_checkpoint;
-use mikuru_trainer::{TrainerConfig, train_jsonl_with_validation};
+use mikuru_trainer::{SamplingConfig, TrainerConfig, train_jsonl_with_validation};
 
 fn main() -> ExitCode {
     match run() {
@@ -191,34 +191,65 @@ fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
                 .ok_or("missing maximum new token count")?
                 .parse::<usize>()?;
 
-            let remaining = args.collect::<Vec<_>>();
+            let options = parse_generate_options(args)?;
 
-            let verbose = remaining
-                .first()
-                .is_some_and(|argument| argument == "--verbose");
-
-            let prompt_parts = if verbose {
-                &remaining[1..]
-            } else {
-                &remaining[..]
-            };
-
-            let prompt = prompt_parts.join(" ");
-
-            if prompt.trim().is_empty() {
-                return Err("missing user message".into());
-            }
-
-            let generated = mikuru_trainer::generate_from_checkpoint(
+            let outcome = mikuru_trainer::generate_from_checkpoint_with_sampling(
                 tokenizer,
-                checkpoint,
-                &prompt,
+                checkpoint.as_str(),
+                &options.prompt,
                 max_new_tokens,
-                verbose,
+                options.sampling,
             )?;
 
-            println!("Generated continuation:");
-            println!("{generated}");
+            if options.json {
+                let payload = serde_json::json!({
+                    "prompt": options.prompt,
+                    "max_new_tokens": max_new_tokens,
+                    "sampling": {
+                        "greedy": options.sampling.greedy,
+                        "temperature": options.sampling.temperature,
+                        "top_p": options.sampling.top_p,
+                        "seed": options.sampling.seed,
+                    },
+                    "prompt_tokens": outcome.prompt_tokens,
+                    "generated_tokens": outcome.generated_tokens,
+                    "stop_reason": outcome.stop_reason,
+                    "text": outcome.text,
+                });
+                println!("{payload}");
+            } else {
+                let checkpoint_path = Path::new(&checkpoint).with_extension("bpk");
+                println!("Loaded checkpoint: {}", checkpoint_path.display());
+                if options.verbose {
+                    if options.sampling.greedy {
+                        println!("Sampling: greedy");
+                    } else {
+                        println!(
+                            "Sampling: nucleus (temperature {:.3}, top_p {:.3}, seed {})",
+                            options.sampling.temperature,
+                            options.sampling.top_p,
+                            options.sampling.seed
+                        );
+                    }
+                }
+                println!("Prompt tokens: {}", outcome.prompt_tokens);
+                println!("Generating up to {max_new_tokens} tokens...");
+                println!();
+
+                match outcome.stop_reason {
+                    mikuru_trainer::GenerationStop::Eos => println!("Generation ended on EOS."),
+                    mikuru_trainer::GenerationStop::StructuralSpecial => {
+                        println!("Generation ended on a structural special token.")
+                    }
+                    mikuru_trainer::GenerationStop::TokenLimit => {
+                        println!("Generation reached the token limit.")
+                    }
+                }
+
+                println!();
+                println!("Generated continuation:");
+                println!("{}", outcome.text);
+            }
         }
 
         Some("help") | Some("--help") | Some("-h") | None => print_help(),
@@ -315,6 +346,76 @@ where
     }
 
     Ok(options)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct GenerateOptions {
+    prompt: String,
+    sampling: SamplingConfig,
+    json: bool,
+    verbose: bool,
+}
+
+/// Parses `generate` options after `<max_tokens>`.
+///
+/// Flags may appear before the prompt. Everything from the first non-flag
+/// argument onward is the prompt, so prompt text may begin with `--`.
+fn parse_generate_options<I>(args: I) -> Result<GenerateOptions, Box<dyn Error + Send + Sync>>
+where
+    I: Iterator<Item = String>,
+{
+    let mut args = args;
+    let mut greedy = true;
+    let mut temperature = 0.8_f32;
+    let mut top_p = 0.9_f32;
+    let mut seed = 42_u64;
+    let mut json = false;
+    let mut verbose = false;
+
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--greedy" => greedy = true,
+            "--json" => json = true,
+            "--verbose" => verbose = true,
+            "--temperature" => {
+                let value = args.next().ok_or("missing value for --temperature")?;
+                temperature = value.parse::<f32>()?;
+                greedy = false;
+            }
+            "--top-p" => {
+                let value = args.next().ok_or("missing value for --top-p")?;
+                top_p = value.parse::<f32>()?;
+                greedy = false;
+            }
+            "--seed" => {
+                let value = args.next().ok_or("missing value for --seed")?;
+                seed = value.parse::<u64>()?;
+            }
+            value if value.starts_with("--") => {
+                return Err(format!("unknown generate option `{value}`").into());
+            }
+            value => {
+                let mut parts = vec![value.to_owned()];
+                parts.extend(args);
+                let prompt = parts.join(" ");
+
+                let sampling = if greedy {
+                    SamplingConfig::greedy()
+                } else {
+                    SamplingConfig::nucleus(temperature, top_p, seed)
+                };
+
+                return Ok(GenerateOptions {
+                    prompt,
+                    sampling,
+                    json,
+                    verbose,
+                });
+            }
+        }
+    }
+
+    Err("missing user message".into())
 }
 
 /// Parses `import-oasst1` options after the two required paths.
@@ -501,7 +602,8 @@ fn print_help() {
                                                        Train the autoregressive LM\n\
            verify-checkpoint <dataset> <tokenizer> <checkpoint> [expected_loss]\n\
                                                        Reload and verify model weights\n\
-           generate <tokenizer> <checkpoint> <max_tokens> [--verbose] <user_message>\n\
+           generate <tokenizer> <checkpoint> <max_tokens> [--greedy]\n\
+                 [--temperature F --top-p F --seed N] [--json] [--verbose] <user_message>\n\
                                                        Generate text from a saved model\n\
            help                                        Show this help"
     );
@@ -680,5 +782,49 @@ mod tests {
         let error = parse_taskmaster1_options(args(&["--revision", " "]))
             .expect_err("empty revisions must be rejected");
         assert!(error.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn generate_options_default_to_greedy_and_join_prompt_words() {
+        let parsed =
+            parse_generate_options(args(&["Hello,", "Mikuru!"])).expect("prompt should parse");
+
+        assert_eq!(parsed.prompt, "Hello, Mikuru!");
+        assert!(parsed.sampling.greedy);
+        assert!(!parsed.json);
+    }
+
+    #[test]
+    fn generate_options_parse_nucleus_flags_and_json() {
+        let parsed = parse_generate_options(args(&[
+            "--temperature",
+            "0.7",
+            "--top-p",
+            "0.95",
+            "--seed",
+            "7",
+            "--json",
+            "Who",
+            "are",
+            "you?",
+        ]))
+        .expect("nucleus flags should parse");
+
+        assert_eq!(parsed.prompt, "Who are you?");
+        assert!(!parsed.sampling.greedy);
+        assert_eq!(parsed.sampling.temperature, 0.7);
+        assert_eq!(parsed.sampling.top_p, 0.95);
+        assert_eq!(parsed.sampling.seed, 7);
+        assert!(parsed.json);
+    }
+
+    #[test]
+    fn generate_options_reject_unknown_flags_and_missing_prompt() {
+        let error =
+            parse_generate_options(args(&["--bogus"])).expect_err("unknown flags must be rejected");
+        assert!(error.to_string().contains("unknown generate option"));
+
+        let error = parse_generate_options(args(&[])).expect_err("prompt is required");
+        assert!(error.to_string().contains("missing user message"));
     }
 }
