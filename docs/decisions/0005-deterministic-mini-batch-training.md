@@ -41,6 +41,10 @@ their metadata must keep loading unchanged.
    `step_time_ms_mean/max`, `epoch_time_s_mean/max`, `peak_rss_kb`, `swap_kb`,
    `cpu_utilization_percent`. `format_version` stays 1; absent fields mean an
    older or full-batch run.
+   Measurement-only additions (2026-11-19): `initial_validation_loss`,
+   `total_train_time_s`, `train_loss_history`, `validation_loss_history`, and
+   per-update `step_losses` (`len == total_steps`). These add forward passes and
+   logging only; they do not alter optimizer updates.
 8. **Metric definitions are explicit.** Peak RSS is `VmHWM`. Swap is a
    point-in-time `VmSwap` (the kernel exposes no per-process peak). CPU
    utilisation comes from `/proc/self/stat` utime+stime and assumes Linux

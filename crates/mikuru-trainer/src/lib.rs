@@ -65,6 +65,12 @@ pub struct TrainerConfig {
     /// `Some(n)` performs one optimizer update per batch and shuffles the
     /// record order once per epoch using [`shuffled_indices`].
     pub batch_size: Option<usize>,
+    /// Whether validation plateaus may end training before `epochs`.
+    ///
+    /// Disabling this only for experiments that need a fixed update count
+    /// changes no other training behaviour: the best checkpoint is still
+    /// selected and saved on every validation improvement.
+    pub early_stopping: bool,
 }
 
 impl Default for TrainerConfig {
@@ -78,6 +84,7 @@ impl Default for TrainerConfig {
             max_seq_len: 128,
             seed: 42,
             batch_size: None,
+            early_stopping: true,
         }
     }
 }
@@ -88,6 +95,7 @@ pub struct TrainingReport {
     pub validation_examples: usize,
     pub epochs: usize,
     pub initial_loss: f32,
+    pub initial_validation_loss: Option<f32>,
     pub final_train_loss: f32,
     pub final_validation_loss: Option<f32>,
     pub checkpoint_path: PathBuf,
@@ -121,6 +129,9 @@ struct CheckpointMetadata {
     validation_records: Option<usize>,
     #[serde(default)]
     initial_loss: Option<f32>,
+    /// Validation loss measured before the first optimizer update.
+    #[serde(default)]
+    initial_validation_loss: Option<f32>,
     #[serde(default)]
     final_loss: Option<f32>,
     #[serde(default)]
@@ -135,6 +146,11 @@ struct CheckpointMetadata {
     early_stopping_patience: Option<usize>,
     #[serde(default)]
     early_stopping_min_delta: Option<f32>,
+    /// Whether the early-stopping decision could end training.
+    ///
+    /// `false` means the run was configured to complete every requested epoch.
+    #[serde(default)]
+    early_stopping_enabled: Option<bool>,
     #[serde(default)]
     batch_size: Option<usize>,
     #[serde(default)]
@@ -151,6 +167,21 @@ struct CheckpointMetadata {
     epoch_time_s_mean: Option<f64>,
     #[serde(default)]
     epoch_time_s_max: Option<f64>,
+    /// End-to-end training wall time in seconds, including validation passes.
+    #[serde(default)]
+    total_train_time_s: Option<f64>,
+    /// Per-epoch training loss, one entry per completed epoch.
+    #[serde(default)]
+    train_loss_history: Option<Vec<f32>>,
+    /// Per-epoch validation loss, one entry per completed epoch.
+    #[serde(default)]
+    validation_loss_history: Option<Vec<f32>>,
+    /// Per-update training loss in execution order.
+    ///
+    /// `len()` equals [`Self::total_steps`]; with mini-batches each entry is
+    /// one optimizer update, and with the legacy path each entry is one epoch.
+    #[serde(default)]
+    step_losses: Option<Vec<f32>>,
     /// Peak resident set size (`VmHWM`), reported in kB by the kernel.
     #[serde(default)]
     peak_rss_kb: Option<u64>,
@@ -424,23 +455,58 @@ fn evaluate_loss(
     device: &Device,
     vocab_size: usize,
     loss_function: &CrossEntropyLoss,
+    eval_batch_size: usize,
 ) -> TrainerResult<f32> {
-    let (inputs, targets, batch_size, sequence_length) = build_batch(sequences, pad_id, device)?;
-
-    let logits = model
-        .forward(inputs)
-        .map_err(io::Error::other)?
-        .reshape([batch_size * sequence_length, vocab_size]);
-
-    let loss = loss_function.forward(logits, targets).into_scalar::<f32>();
-
-    if !loss.is_finite() {
-        return Err(invalid_input(format!(
-            "Evaluation produced a non-finite loss: {loss}"
-        )));
+    if eval_batch_size == 0 {
+        return Err(invalid_input(
+            "Evaluation batch size must be greater than zero",
+        ));
     }
 
-    Ok(loss)
+    let mut weighted_loss_sum = 0.0f64;
+    let mut total_weight = 0usize;
+
+    for range in batch_ranges(sequences.len(), eval_batch_size) {
+        let batch = &sequences[range];
+
+        let weight = batch
+            .iter()
+            .map(|sequence| sequence.len().saturating_sub(1))
+            .sum::<usize>();
+
+        if weight == 0 {
+            continue;
+        }
+
+        let (loss_value, batch_count) = {
+            let (inputs, targets, batch_count, sequence_length) =
+                build_batch(batch, pad_id, device)?;
+
+            let logits = model
+                .forward(inputs)
+                .map_err(io::Error::other)?
+                .reshape([batch_count * sequence_length, vocab_size]);
+
+            let loss = loss_function.forward(logits, targets).into_scalar::<f32>();
+            (loss, batch_count)
+        };
+
+        if !loss_value.is_finite() {
+            return Err(invalid_input(format!(
+                "Evaluation produced a non-finite loss: {loss_value}"
+            )));
+        }
+
+        weighted_loss_sum += f64::from(loss_value) * weight as f64;
+        total_weight += weight;
+        let _ = batch_count;
+    }
+
+    if total_weight == 0 {
+        return Err(invalid_input("Evaluation produced no target tokens"));
+    }
+
+    Ok((weighted_loss_sum / total_weight as f64) as f32)
 }
 
 /// SplitMix64 step used by the deterministic shuffle.
@@ -662,6 +728,9 @@ pub fn train_jsonl_with_validation(
     // Measured before any optimizer update. On the legacy full-batch path
     // this is numerically identical to the old first-epoch loss; on the
     // mini-batch path it reports the whole dataset instead of one batch.
+    // Bound evaluation memory independently of the training batch policy.
+    let evaluation_batch_size = config.batch_size.unwrap_or(16);
+
     let initial_loss = Some(evaluate_loss(
         &model,
         &train_sequences,
@@ -669,7 +738,28 @@ pub fn train_jsonl_with_validation(
         &device,
         vocab_size,
         &loss_function,
+        evaluation_batch_size,
     )?);
+
+    // Measured before any optimizer update, so batch-size changes can be
+    // compared from a like-for-like starting point on both splits.
+    let initial_validation_loss = if validation_sequences.is_empty() {
+        None
+    } else {
+        Some(evaluate_loss(
+            &model,
+            &validation_sequences,
+            pad_id,
+            &device,
+            vocab_size,
+            &loss_function,
+            evaluation_batch_size,
+        )?)
+    };
+
+    let mut step_losses = Vec::with_capacity(steps_per_epoch * config.epochs);
+    let mut train_loss_history = Vec::with_capacity(config.epochs);
+    let mut validation_loss_history = Vec::new();
 
     let mut early_stopping = early_stopping::EarlyStopping::default();
     let mut best_validation_loss = None;
@@ -686,11 +776,15 @@ pub fn train_jsonl_with_validation(
     let mut epoch_time_total_s = 0.0f64;
     let mut epoch_time_max_s = 0.0f64;
 
-    println!(
-        "Early stopping: patience={}, min_delta={:.3}",
-        early_stopping::DEFAULT_PATIENCE,
-        early_stopping::DEFAULT_MIN_DELTA
-    );
+    if config.early_stopping {
+        println!(
+            "Early stopping: patience={}, min_delta={:.3}",
+            early_stopping::DEFAULT_PATIENCE,
+            early_stopping::DEFAULT_MIN_DELTA
+        );
+    } else {
+        println!("Early stopping: disabled; training will complete every requested epoch");
+    }
     println!();
 
     for epoch in 1..=config.epochs {
@@ -739,6 +833,8 @@ pub fn train_jsonl_with_validation(
                 )));
             }
 
+            step_losses.push(loss_value);
+
             let gradients = loss.backward();
             let gradients = GradientsParams::from_grads(gradients, &model);
             model = optimizer.step(config.learning_rate, model, gradients);
@@ -760,6 +856,7 @@ pub fn train_jsonl_with_validation(
         // proportion to its supervised positions rather than equally.
         let loss_value = (weighted_loss_sum / weight_sum as f64) as f32;
         epochs_completed = epoch;
+        train_loss_history.push(loss_value);
 
         let epoch_seconds = epoch_start.elapsed().as_secs_f64();
         epoch_time_total_s += epoch_seconds;
@@ -788,7 +885,9 @@ pub fn train_jsonl_with_validation(
             &device,
             vocab_size,
             &loss_function,
+            evaluation_batch_size,
         )?;
+        validation_loss_history.push(validation_loss);
 
         match early_stopping.observe(validation_loss) {
             early_stopping::EarlyStoppingDecision::Improved => {
@@ -816,12 +915,14 @@ pub fn train_jsonl_with_validation(
                     "[Epoch {epoch:>3}/{:>3}] train loss: {loss_value:.5}{step_note} | validation loss: {validation_loss:.5}",
                     config.epochs
                 );
-                println!(
-                    "Early stopping: validation did not improve for {} consecutive epochs.",
-                    early_stopping::DEFAULT_PATIENCE
-                );
-                stopped_early = true;
-                break;
+                if config.early_stopping {
+                    println!(
+                        "Early stopping: validation did not improve for {} consecutive epochs.",
+                        early_stopping::DEFAULT_PATIENCE
+                    );
+                    stopped_early = true;
+                    break;
+                }
             }
         }
     }
@@ -865,6 +966,7 @@ pub fn train_jsonl_with_validation(
         &device,
         vocab_size,
         &loss_function,
+        evaluation_batch_size,
     )?;
 
     let final_validation_loss = if validation_sequences.is_empty() {
@@ -897,6 +999,7 @@ pub fn train_jsonl_with_validation(
         train_records: Some(resolved.train.len()),
         validation_records: Some(resolved.validation.len()),
         initial_loss: Some(initial_loss),
+        initial_validation_loss,
         final_loss: Some(final_train_loss),
         validation_loss: final_validation_loss,
         epochs_attempted: Some(epochs_completed),
@@ -904,6 +1007,7 @@ pub fn train_jsonl_with_validation(
         early_stopped: Some(stopped_early),
         early_stopping_patience: Some(early_stopping::DEFAULT_PATIENCE),
         early_stopping_min_delta: Some(early_stopping::DEFAULT_MIN_DELTA),
+        early_stopping_enabled: Some(config.early_stopping),
         batch_size: config.batch_size,
         batching_policy: Some(batching_policy.clone()),
         steps_per_epoch: Some(steps_per_epoch),
@@ -912,6 +1016,10 @@ pub fn train_jsonl_with_validation(
         step_time_ms_max,
         epoch_time_s_mean,
         epoch_time_s_max,
+        total_train_time_s: Some(wall_seconds),
+        train_loss_history: Some(train_loss_history),
+        validation_loss_history: Some(validation_loss_history),
+        step_losses: Some(step_losses),
         peak_rss_kb,
         swap_kb,
         cpu_utilization_percent,
@@ -921,6 +1029,10 @@ pub fn train_jsonl_with_validation(
 
     println!();
     println!("Initial train loss: {initial_loss:.5}");
+    match initial_validation_loss {
+        Some(loss) => println!("Initial validation loss: {loss:.5}"),
+        None => println!("Initial validation loss: not evaluated (no validation records)"),
+    }
     println!("Final train loss:   {final_train_loss:.5}");
 
     match final_validation_loss {
@@ -954,6 +1066,7 @@ pub fn train_jsonl_with_validation(
         validation_examples: resolved.validation.len(),
         epochs: epochs_completed,
         initial_loss,
+        initial_validation_loss,
         final_train_loss,
         final_validation_loss,
         checkpoint_path,
@@ -1084,6 +1197,173 @@ pub fn verify_checkpoint(
     Ok(loss)
 }
 
+/// Deterministic SplitMix64 generator used for reproducible nucleus sampling.
+///
+/// The sampler must not depend on the backend RNG: evaluation runs are
+/// compared across binaries and machines, so the seed contract lives here.
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut value = self.state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        value ^ (value >> 31)
+    }
+
+    fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64))
+    }
+}
+
+/// Decoding settings for generation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplingConfig {
+    /// Softmax temperature. Ignored when `greedy` is true.
+    pub temperature: f32,
+    /// Nucleus probability mass in `(0, 1]`. Ignored when `greedy` is true.
+    pub top_p: f32,
+    /// Seed for the deterministic sampler.
+    pub seed: u64,
+    /// Greedy argmax decoding. This is the default and the v2 behaviour.
+    pub greedy: bool,
+}
+
+impl SamplingConfig {
+    pub fn greedy() -> Self {
+        Self {
+            temperature: 1.0,
+            top_p: 1.0,
+            seed: 42,
+            greedy: true,
+        }
+    }
+
+    pub fn nucleus(temperature: f32, top_p: f32, seed: u64) -> Self {
+        Self {
+            temperature,
+            top_p,
+            seed,
+            greedy: false,
+        }
+    }
+
+    fn validate(&self) -> TrainerResult<()> {
+        if !self.greedy {
+            if !self.temperature.is_finite() || self.temperature <= 0.0 {
+                return Err(invalid_input(
+                    "temperature must be finite and greater than zero",
+                ));
+            }
+            if !self.top_p.is_finite() || self.top_p <= 0.0 || self.top_p > 1.0 {
+                return Err(invalid_input("top_p must be in (0, 1]"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Why decoding stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationStop {
+    Eos,
+    TokenLimit,
+    StructuralSpecial,
+}
+
+/// A complete generation result, including termination metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Generation {
+    pub text: String,
+    pub prompt_tokens: usize,
+    pub generated_tokens: usize,
+    pub stop_reason: GenerationStop,
+}
+
+/// Picks the next token from logits with either greedy argmax or seeded
+/// nucleus sampling.
+fn sample_next_token(logits: &[f32], config: &SamplingConfig, rng: &mut SplitMix64) -> u32 {
+    debug_assert!(!logits.is_empty());
+
+    if config.greedy {
+        let mut best_index = 0;
+        let mut best_value = f32::NEG_INFINITY;
+        for (index, &value) in logits.iter().enumerate() {
+            if value > best_value {
+                best_value = value;
+                best_index = index;
+            }
+        }
+        return best_index as u32;
+    }
+
+    let temperature = config.temperature as f64;
+    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max) as f64;
+
+    let mut ranked = logits
+        .iter()
+        .enumerate()
+        .map(|(index, &logit)| {
+            let weight = ((logit as f64 - max_logit) / temperature).exp();
+            (index, weight)
+        })
+        .collect::<Vec<(usize, f64)>>();
+
+    let total = ranked.iter().map(|(_, weight)| weight).sum::<f64>();
+
+    if !total.is_finite() || total <= 0.0 {
+        // Degenerate logits: fall back to argmax instead of dividing by zero.
+        return sample_next_token(
+            logits,
+            &SamplingConfig {
+                greedy: true,
+                ..*config
+            },
+            rng,
+        );
+    }
+
+    for (_, weight) in &mut ranked {
+        *weight /= total;
+    }
+
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .partial_cmp(&left.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut cumulative = 0.0;
+    let mut cutoff = ranked.len();
+    for (rank, (_, weight)) in ranked.iter().enumerate() {
+        cumulative += weight;
+        if cumulative >= config.top_p as f64 {
+            cutoff = rank + 1;
+            break;
+        }
+    }
+
+    let target = rng.next_f64() * cumulative;
+    let mut running = 0.0;
+    for &(index, weight) in &ranked[..cutoff] {
+        running += weight;
+        if target < running {
+            return index as u32;
+        }
+    }
+
+    ranked[cutoff - 1].0 as u32
+}
+
 /// Generates a continuation using greedy autoregressive decoding.
 ///
 /// Loads a checkpoint and tokenizer, then predicts one token at a time.
@@ -1093,8 +1373,32 @@ pub fn generate_from_checkpoint(
     checkpoint_base: impl AsRef<Path>,
     prompt: &str,
     max_new_tokens: usize,
-    verbose: bool,
+    _verbose: bool,
 ) -> TrainerResult<String> {
+    generate_from_checkpoint_with_sampling(
+        tokenizer_path,
+        checkpoint_base,
+        prompt,
+        max_new_tokens,
+        SamplingConfig::greedy(),
+    )
+    .map(|generation| generation.text)
+}
+
+/// Generates a continuation with explicit decoding settings.
+///
+/// The function is quiet: callers own presentation. Greedy decoding is
+/// bit-identical to the legacy path; nucleus sampling is deterministic for a
+/// given `(prompt, seed, temperature, top_p)` on the same binary and backend.
+pub fn generate_from_checkpoint_with_sampling(
+    tokenizer_path: impl AsRef<Path>,
+    checkpoint_base: impl AsRef<Path>,
+    prompt: &str,
+    max_new_tokens: usize,
+    sampling: SamplingConfig,
+) -> TrainerResult<Generation> {
+    sampling.validate()?;
+
     if prompt.trim().is_empty() {
         return Err(invalid_input("Prompt must not be empty"));
     }
@@ -1181,15 +1485,12 @@ pub fn generate_from_checkpoint(
         .try_load_file(&checkpoint_path)
         .map_err(io::Error::other)?;
 
+    let prompt_tokens = context_ids.len();
     let mut generated_ids = Vec::with_capacity(max_new_tokens);
-    let mut stop_reason: Option<&str> = None;
+    let mut stop_reason = GenerationStop::TokenLimit;
+    let mut rng = SplitMix64::new(sampling.seed);
 
-    println!("Loaded checkpoint: {}", checkpoint_path.display());
-    println!("Prompt tokens: {}", context_ids.len());
-    println!("Generating up to {max_new_tokens} tokens...");
-    println!();
-
-    for step in 0..max_new_tokens {
+    for _ in 0..max_new_tokens {
         // Keep only the most recent context that fits the model.
         let context_start = context_ids.len().saturating_sub(metadata.max_seq_len);
 
@@ -1214,14 +1515,14 @@ pub fn generate_from_checkpoint(
         let logits = model.forward(input).map_err(io::Error::other)?;
 
         // Only the final sequence position predicts the next token.
-        let next_token = logits
+        let logits = logits
             .slice([0..1, (context_length - 1)..context_length, 0..vocab_size])
             .reshape([vocab_size])
-            .argmax(0)
-            .into_scalar::<i32>();
+            .into_data()
+            .try_to_vec::<f32>()
+            .map_err(|error| io::Error::other(format!("failed to read logits: {error}")))?;
 
-        let next_id = u32::try_from(next_token)
-            .map_err(|_| invalid_input("Model produced an invalid token ID"))?;
+        let next_id = sample_next_token(&logits, &sampling, &mut rng);
 
         if next_id as usize >= vocab_size {
             return Err(invalid_input(
@@ -1231,33 +1532,27 @@ pub fn generate_from_checkpoint(
 
         // EOS ends generation. Structural special tokens are not emitted.
         if next_id == eos_id {
-            stop_reason = Some("EOS");
+            stop_reason = GenerationStop::Eos;
             break;
         }
 
         if next_id == bos_id || next_id == pad_id || next_id == unk_id {
-            stop_reason = Some("a structural special token");
+            stop_reason = GenerationStop::StructuralSpecial;
             break;
         }
 
         generated_ids.push(next_id);
         context_ids.push(next_id);
-
-        if verbose {
-            println!("Generated token {}/{}", step + 1, max_new_tokens);
-        }
     }
 
-    let generated_text = tokenizer.decode(&generated_ids)?;
+    let text = tokenizer.decode(&generated_ids)?;
 
-    println!();
-
-    match stop_reason {
-        Some(reason) => println!("Generation ended on {reason}."),
-        None => println!("Generation reached the token limit."),
-    }
-
-    Ok(generated_text)
+    Ok(Generation {
+        text,
+        prompt_tokens,
+        generated_tokens: generated_ids.len(),
+        stop_reason,
+    })
 }
 
 #[cfg(test)]
@@ -1350,6 +1645,7 @@ mod tests {
             max_seq_len: 128,
             seed: 7,
             batch_size: None,
+            early_stopping: true,
         }
     }
 
@@ -1403,11 +1699,11 @@ mod tests {
 
         let input_values = inputs
             .into_data()
-            .to_vec::<i32>()
+            .try_to_vec::<i32>()
             .expect("inputs should convert");
         let target_values = targets
             .into_data()
-            .to_vec::<i32>()
+            .try_to_vec::<i32>()
             .expect("targets should convert");
 
         assert_eq!(input_values, vec![10, 11, 20, 0]);
@@ -1416,6 +1712,76 @@ mod tests {
             vec![11, 12, 21, 0],
             "targets must be the next token for every position; PAD rows use PAD targets"
         );
+    }
+
+    #[test]
+    fn nucleus_sampling_is_deterministic_and_seed_sensitive() {
+        let logits = vec![0.1, 1.2, -0.4, 2.0, 0.3, 0.05, 1.8, -1.0];
+        let config = SamplingConfig::nucleus(0.9, 0.9, 1234);
+
+        let draw = |seed: u64| {
+            let mut rng = SplitMix64::new(seed);
+            (0..128)
+                .map(|_| sample_next_token(&logits, &config, &mut rng))
+                .collect::<Vec<u32>>()
+        };
+
+        let first = draw(1234);
+        let second = draw(1234);
+
+        assert_eq!(first, second, "same seed must reproduce the same sample");
+        assert!(
+            first.iter().all(|&token| (token as usize) < logits.len()),
+            "sampled token IDs must stay inside the vocabulary"
+        );
+        assert_ne!(
+            first,
+            draw(99),
+            "different seeds should explore differently"
+        );
+
+        let mut rng = SplitMix64::new(7);
+        assert_eq!(
+            sample_next_token(&logits, &SamplingConfig::greedy(), &mut rng),
+            3,
+            "greedy decoding must select the largest logit"
+        );
+
+        assert!(SamplingConfig::nucleus(0.0, 0.9, 1).validate().is_err());
+        assert!(SamplingConfig::nucleus(0.8, 0.0, 1).validate().is_err());
+        assert!(SamplingConfig::nucleus(0.8, 1.01, 1).validate().is_err());
+    }
+
+    #[test]
+    fn generation_stops_on_eos_after_memorising_a_reply() {
+        let dir = temp_dir("generation-eos");
+
+        let records = vec![conversation("solo", Some("train"), "Hello, Mikuru!", "Hi!")];
+
+        let input = dir.join("dataset.jsonl");
+        write_jsonl(&input, &records).expect("dataset should be written");
+
+        let tokenizer = build_tokenizer(&dir, &records);
+        let checkpoint = dir.join("model");
+
+        // One short record, so the run reliably memorises; the point is the
+        // generation loop, not model quality.
+        let config = test_config(300);
+
+        train_jsonl(&input, &tokenizer, &checkpoint, &config)
+            .expect("memorisation run should succeed");
+
+        let generated =
+            generate_from_checkpoint(&tokenizer, &checkpoint, "Hello, Mikuru!", 16, false)
+                .expect("generation should succeed");
+
+        assert_eq!(
+            generated.trim(),
+            "Hi!",
+            "the model should reproduce the learned reply and stop on EOS"
+        );
+
+        fs::remove_dir_all(dir).expect("temporary directory should be removed");
     }
 
     #[test]
@@ -1455,6 +1821,7 @@ mod tests {
         assert_eq!(report.train_examples, 5);
         assert_eq!(report.validation_examples, 1);
         assert!(report.final_validation_loss.is_some_and(f32::is_finite));
+        assert!(report.initial_validation_loss.is_some_and(f32::is_finite));
 
         let metadata: CheckpointMetadata = serde_json::from_slice(
             &fs::read(&report.metadata_path).expect("metadata should be readable"),
@@ -1464,6 +1831,32 @@ mod tests {
         assert_eq!(metadata.batch_size, Some(2));
         assert_eq!(metadata.steps_per_epoch, Some(3));
         assert_eq!(metadata.total_steps, Some(6));
+        assert_eq!(
+            metadata.initial_validation_loss,
+            report.initial_validation_loss
+        );
+        assert!(metadata.total_train_time_s.is_some_and(|s| s > 0.0));
+
+        let step_losses = metadata
+            .step_losses
+            .expect("step losses should be recorded");
+        assert_eq!(
+            step_losses.len(),
+            6,
+            "one loss per optimizer update is required"
+        );
+        assert!(step_losses.iter().all(|loss| loss.is_finite()));
+
+        let train_history = metadata
+            .train_loss_history
+            .expect("train history should be recorded");
+        let validation_history = metadata
+            .validation_loss_history
+            .expect("validation history should be recorded");
+        assert_eq!(train_history.len(), 2);
+        assert_eq!(validation_history.len(), 2);
+        assert!(train_history.iter().all(|loss| loss.is_finite()));
+        assert!(validation_history.iter().all(|loss| loss.is_finite()));
         assert!(
             metadata
                 .batching_policy
@@ -1474,6 +1867,80 @@ mod tests {
         assert!(metadata.epoch_time_s_mean.is_some());
         assert!(metadata.peak_rss_kb.is_some());
         assert_eq!(metadata.format_version, 1);
+
+        fs::remove_dir_all(dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn disabled_early_stopping_completes_every_requested_epoch() {
+        let dir = temp_dir("disabled-early-stopping");
+
+        let records = vec![
+            conversation(
+                "train-1",
+                Some("train"),
+                "Hello, Mikuru!",
+                "Hello! What shall we explore today?",
+            ),
+            conversation(
+                "validation-1",
+                Some("validation"),
+                "How are you today?",
+                "I'm doing well, thank you.",
+            ),
+        ];
+
+        let input = dir.join("dataset.jsonl");
+        write_jsonl(&input, &records).expect("dataset should be written");
+
+        let tokenizer = build_tokenizer(&dir, &records);
+
+        // A near-zero learning rate freezes the weights, so validation loss is
+        // effectively identical every epoch and the patience counter is
+        // deterministic.
+        let mut config = test_config(5);
+        config.learning_rate = 1e-9;
+
+        let full_checkpoint = dir.join("full-model");
+        config.early_stopping = false;
+        train_jsonl(&input, &tokenizer, &full_checkpoint, &config)
+            .expect("training without early stopping should succeed");
+
+        let full_metadata: CheckpointMetadata = serde_json::from_slice(
+            &fs::read(full_checkpoint.with_extension("json")).expect("metadata should be readable"),
+        )
+        .expect("metadata should parse");
+
+        assert_eq!(full_metadata.early_stopping_enabled, Some(false));
+        assert_eq!(full_metadata.early_stopped, Some(false));
+        assert_eq!(full_metadata.epochs_attempted, Some(5));
+        assert_eq!(full_metadata.total_steps, Some(5));
+        assert_eq!(
+            full_metadata
+                .validation_loss_history
+                .expect("validation history should be recorded")
+                .len(),
+            5
+        );
+
+        let stopped_checkpoint = dir.join("stopped-model");
+        config.early_stopping = true;
+        train_jsonl(&input, &tokenizer, &stopped_checkpoint, &config)
+            .expect("training with early stopping should succeed");
+
+        let stopped_metadata: CheckpointMetadata = serde_json::from_slice(
+            &fs::read(stopped_checkpoint.with_extension("json"))
+                .expect("metadata should be readable"),
+        )
+        .expect("metadata should parse");
+
+        assert_eq!(stopped_metadata.early_stopping_enabled, Some(true));
+        assert_eq!(stopped_metadata.early_stopped, Some(true));
+        assert_eq!(
+            stopped_metadata.epochs_attempted,
+            Some(4),
+            "patience 3 must stop after the fourth identical validation loss"
+        );
 
         fs::remove_dir_all(dir).expect("temporary directory should be removed");
     }
@@ -1534,6 +2001,11 @@ mod tests {
         );
         assert_eq!(metadata.steps_per_epoch, Some(1));
         assert_eq!(metadata.total_steps, Some(2));
+        assert_eq!(
+            metadata.step_losses.as_ref().map(Vec::len),
+            Some(2),
+            "the legacy path records one loss per epoch"
+        );
 
         let error = train_jsonl(&input, &tokenizer, &checkpoint, &test_config(1))
             .expect_err("existing checkpoint must never be overwritten");
@@ -1591,6 +2063,7 @@ mod tests {
             &device,
             vocab_size,
             &loss_function,
+            1,
         )
         .expect("first evaluation should succeed");
 
@@ -1601,6 +2074,7 @@ mod tests {
             &device,
             vocab_size,
             &loss_function,
+            1,
         )
         .expect("second evaluation should succeed");
 

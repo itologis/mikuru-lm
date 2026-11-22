@@ -157,7 +157,7 @@ mod tests {
             .forward(input)
             .expect("forward should succeed")
             .into_data()
-            .to_vec::<f32>()
+            .try_to_vec::<f32>()
             .expect("logits should convert to f32")
     }
 

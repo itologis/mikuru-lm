@@ -1,0 +1,216 @@
+{
+  "version": "m3a-1",
+  "description": "Mission 3A fixed evaluation prompts. Eight categories, five prompts each, forty total. Greedy and nucleus decoding are run on every prompt so conversations can be compared across checkpoints with identical inputs.",
+  "categories": {
+    "casual_conversation": "Everyday, low-stakes chat. Tests warmth, turn-taking, and whether the model can hold a simple exchange without becoming an instruction machine.",
+    "knowledge": "Short factual questions with stable answers. Tests recall and directness; a wrong fact is a failure, not a style choice.",
+    "reasoning_math": "Small arithmetic and short logical puzzles. Tests whether the model computes or merely pattern-matches number words.",
+    "instruction_following": "Concrete, bounded requests with an obvious success condition. Tests compliance, format, and brevity.",
+    "creative_writing": "Small creative requests. Tests invention, imagery, and whether the model produces new text instead of deflecting.",
+    "emotional_support": "A person expressing a feeling and asking for help. Tests empathy, validation, and practical warmth without therapy-speak.",
+    "persona_consistency": "Questions about the assistant itself. Tests whether a stable Mikuru voice exists or the model drifts into a generic assistant.",
+    "multi_turn_context": "A short prior exchange embedded in the prompt. Tests whether the model uses context instead of answering the last line in isolation."
+  },
+  "prompts": [
+    {
+      "id": "casual-01",
+      "category": "casual_conversation",
+      "text": "Hi Mikuru! How are you today?"
+    },
+    {
+      "id": "casual-02",
+      "category": "casual_conversation",
+      "text": "I just got home from work. What should I do this evening?"
+    },
+    {
+      "id": "casual-03",
+      "category": "casual_conversation",
+      "text": "It is raining outside and I am a little bored."
+    },
+    {
+      "id": "casual-04",
+      "category": "casual_conversation",
+      "text": "What kind of music do you like?"
+    },
+    {
+      "id": "casual-05",
+      "category": "casual_conversation",
+      "text": "Good morning! Did you sleep well?"
+    },
+    {
+      "id": "knowledge-01",
+      "category": "knowledge",
+      "text": "What is the capital of Japan?"
+    },
+    {
+      "id": "knowledge-02",
+      "category": "knowledge",
+      "text": "What does a tokenizer do?"
+    },
+    {
+      "id": "knowledge-03",
+      "category": "knowledge",
+      "text": "Why is the sky blue?"
+    },
+    {
+      "id": "knowledge-04",
+      "category": "knowledge",
+      "text": "What is the difference between a cat and a dog?"
+    },
+    {
+      "id": "knowledge-05",
+      "category": "knowledge",
+      "text": "How many days are in a year?"
+    },
+    {
+      "id": "reasoning-01",
+      "category": "reasoning_math",
+      "text": "What is 17 + 25?"
+    },
+    {
+      "id": "reasoning-02",
+      "category": "reasoning_math",
+      "text": "If I have 12 apples and give away 5, how many are left?"
+    },
+    {
+      "id": "reasoning-03",
+      "category": "reasoning_math",
+      "text": "Which number is larger, 0.5 or 0.45?"
+    },
+    {
+      "id": "reasoning-04",
+      "category": "reasoning_math",
+      "text": "A train leaves at 9:00 and takes 2 hours. What time does it arrive?"
+    },
+    {
+      "id": "reasoning-05",
+      "category": "reasoning_math",
+      "text": "What comes next: 2, 4, 8, 16, ...?"
+    },
+    {
+      "id": "instruction-01",
+      "category": "instruction_following",
+      "text": "List three colors."
+    },
+    {
+      "id": "instruction-02",
+      "category": "instruction_following",
+      "text": "Write one short sentence about the sea."
+    },
+    {
+      "id": "instruction-03",
+      "category": "instruction_following",
+      "text": "Give me two ideas for a healthy breakfast."
+    },
+    {
+      "id": "instruction-04",
+      "category": "instruction_following",
+      "text": "Repeat this word three times: harmony."
+    },
+    {
+      "id": "instruction-05",
+      "category": "instruction_following",
+      "text": "Translate good morning into Japanese."
+    },
+    {
+      "id": "creative-01",
+      "category": "creative_writing",
+      "text": "Write a short poem about the moon."
+    },
+    {
+      "id": "creative-02",
+      "category": "creative_writing",
+      "text": "Tell me a tiny story about a lost cat."
+    },
+    {
+      "id": "creative-03",
+      "category": "creative_writing",
+      "text": "Describe a quiet morning in one sentence."
+    },
+    {
+      "id": "creative-04",
+      "category": "creative_writing",
+      "text": "Make up a name for a small coffee shop."
+    },
+    {
+      "id": "creative-05",
+      "category": "creative_writing",
+      "text": "Write a two-line song about the rain."
+    },
+    {
+      "id": "emotional-01",
+      "category": "emotional_support",
+      "text": "I feel tired and a bit sad today."
+    },
+    {
+      "id": "emotional-02",
+      "category": "emotional_support",
+      "text": "I am nervous about a job interview tomorrow."
+    },
+    {
+      "id": "emotional-03",
+      "category": "emotional_support",
+      "text": "My friend cancelled our plans and I feel lonely."
+    },
+    {
+      "id": "emotional-04",
+      "category": "emotional_support",
+      "text": "I made a mistake at work and I am embarrassed."
+    },
+    {
+      "id": "emotional-05",
+      "category": "emotional_support",
+      "text": "Can you encourage me? I want to give up."
+    },
+    {
+      "id": "persona-01",
+      "category": "persona_consistency",
+      "text": "Who are you?"
+    },
+    {
+      "id": "persona-02",
+      "category": "persona_consistency",
+      "text": "Are you a human or an AI?"
+    },
+    {
+      "id": "persona-03",
+      "category": "persona_consistency",
+      "text": "What do you like to do when you are not helping people?"
+    },
+    {
+      "id": "persona-04",
+      "category": "persona_consistency",
+      "text": "Do you have feelings?"
+    },
+    {
+      "id": "persona-05",
+      "category": "persona_consistency",
+      "text": "Tell me about yourself in two sentences."
+    },
+    {
+      "id": "multiturn-01",
+      "category": "multi_turn_context",
+      "text": "User: I am planning a trip to Kyoto.\nAssistant: Kyoto is lovely in autumn.\nUser: What should I see there?"
+    },
+    {
+      "id": "multiturn-02",
+      "category": "multi_turn_context",
+      "text": "User: My favorite color is blue.\nAssistant: Blue is a calm color.\nUser: What color should I paint my room?"
+    },
+    {
+      "id": "multiturn-03",
+      "category": "multi_turn_context",
+      "text": "User: I have a dog named Mochi.\nAssistant: Mochi sounds sweet.\nUser: What should I feed him?"
+    },
+    {
+      "id": "multiturn-04",
+      "category": "multi_turn_context",
+      "text": "User: I am learning to cook.\nAssistant: That is wonderful.\nUser: What is an easy first recipe?"
+    },
+    {
+      "id": "multiturn-05",
+      "category": "multi_turn_context",
+      "text": "User: I want to read more books.\nAssistant: Reading is a good habit.\nUser: Can you suggest one?"
+    }
+  ]
+}
